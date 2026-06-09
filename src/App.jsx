@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import TodayTab from './components/TodayTab'
+import DayTab from './components/DayTab'
 import ProgressTab from './components/ProgressTab'
 import ManageTab from './components/ManageTab'
+import { getToday, getTomorrow } from './utils'
 
 const TABS = [
-  { id: 'today', label: '오늘', icon: '📅' },
+  { id: 'today',    label: '오늘',   icon: '📅' },
+  { id: 'tomorrow', label: '내일',   icon: '🌙' },
   { id: 'progress', label: '진도표', icon: '📊' },
-  { id: 'manage', label: '관리', icon: '⚙️' },
+  { id: 'manage',   label: '관리',   icon: '⚙️' },
 ]
 
 export default function App() {
@@ -20,9 +22,10 @@ export default function App() {
       </header>
 
       <main style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
-        {tab === 'today' && <TodayTab />}
+        {tab === 'today'    && <DayTab date={getToday()} />}
+        {tab === 'tomorrow' && <DayTab date={getTomorrow()} />}
         {tab === 'progress' && <ProgressTab />}
-        {tab === 'manage' && <ManageTab />}
+        {tab === 'manage'   && <ManageTab />}
       </main>
 
       <nav className="bottom-nav">
