@@ -19,7 +19,8 @@ export default function TodayTab() {
   const [todayLessons, setTodayLessons] = useState([])
   const [schedules, setSchedules] = useState([])
   const [loading, setLoading] = useState(true)
-  const [toastField, setToastField] = useState(null)
+  const [toastField, setToastField] = useState(null) // 'morning' | 'afternoon' | 'error'
+  const [toastMsg, setToastMsg] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -47,16 +48,13 @@ export default function TodayTab() {
         const cn = dayData[String(p)] || dayData[p]
         if (cn && cn.trim()) {
           const logs = await getProgressLogs(cn)
-          // last done entry before or on today
           const lastDone = [...logs]
-            .filter(l => l.status === 'done' && l.date <= today)
+            .filter(l => l.status === 'done' && l.date < today)
             .sort((a,b) => b.date.localeCompare(a.date))[0]
-          // today's entry (plan or done)
           const todayEntry = logs.find(l => l.date === today) || null
           lessons.push({
             period: p,
             className: cn.trim(),
-            logs,
             todayEntry,
             lastClass: lastDone?.content || '',
             thisClass: todayEntry?.content || '',
@@ -64,12 +62,15 @@ export default function TodayTab() {
         }
       }
       setTodayLessons(lessons)
-    } catch(e) { console.error(e) }
+    } catch(e) {
+      console.error('[load]', e)
+    }
     setLoading(false)
   }, [today, weekKey, dayKey])
 
   useEffect(() => { load() }, [load])
 
+  // ── 마감 ──────────────────────────────────────────────
   const toggleDeadline = async (realIdx) => {
     const updated = deadlines.map((d, i) => i === realIdx ? { ...d, done: !d.done } : d)
     setDeadlines(updated)
@@ -82,36 +83,59 @@ export default function TodayTab() {
     return diff >= 0 && diff <= 7
   }).sort((a,b) => a.date.localeCompare(b.date))
 
-  const showToast = (field) => {
+  // ── 토스트 ─────────────────────────────────────────────
+  const showToast = (field, msg = '') => {
     setToastField(field)
-    setTimeout(() => setToastField(null), 2000)
+    setToastMsg(msg)
+    setTimeout(() => { setToastField(null); setToastMsg('') }, 2500)
   }
 
+  // ── 조회/종례 저장 ─────────────────────────────────────
   const saveHomeroomField = async (field, value) => {
     const updated = { ...homeroom, [field]: value }
     setHomeroom(updated)
-    await saveHomeroom(today, updated)
-    showToast(field)
-  }
-
-  const completeLesson = async (lesson) => {
-    const content = lesson.editedThisClass ?? lesson.thisClass ?? ''
-    const logs = [...lesson.logs]
-    const idx = logs.findIndex(l => l.date === today)
-    const entry = {
-      id: idx >= 0 ? logs[idx].id : `${today}-${lesson.className}-${Date.now()}`,
-      week: weekKey,
-      date: today,
-      content,
-      lastClassNote: lesson.editedLastClass ?? lesson.lastClass,
-      status: 'done'
+    try {
+      await saveHomeroom(today, updated)
+      showToast(field)
+    } catch(e) {
+      console.error('[homeroom save]', e)
+      showToast('error', '저장 실패 ✕')
     }
-    if (idx >= 0) logs[idx] = entry
-    else logs.push(entry)
-    await saveProgressLog(lesson.className, logs)
-    await load()
   }
 
+  // ── 수업 완료 ──────────────────────────────────────────
+  const completeLesson = async (lesson, setCompleting) => {
+    setCompleting(true)
+    try {
+      // 항상 Firestore 최신 데이터를 가져온 뒤 저장 (stale data 방지)
+      const freshLogs = await getProgressLogs(lesson.className)
+      const content = lesson.editedThisClass ?? lesson.thisClass ?? ''
+      const idx = freshLogs.findIndex(l => l.date === today)
+      const entry = {
+        id: idx >= 0
+          ? freshLogs[idx].id
+          : `${today}-${lesson.className}-${Date.now()}`,
+        week: weekKey,
+        date: today,
+        content,
+        lastClassNote: lesson.editedLastClass ?? lesson.lastClass ?? '',
+        status: 'done',
+      }
+      const updatedLogs = [...freshLogs]
+      if (idx >= 0) updatedLogs[idx] = entry
+      else updatedLogs.push(entry)
+
+      await saveProgressLog(lesson.className, updatedLogs)
+      showToast('complete', '✅ 저장됨')
+      await load()
+    } catch(e) {
+      console.error('[completeLesson]', e)
+      showToast('error', `저장 실패: ${e.code || e.message || '알 수 없는 오류'}`)
+    }
+    setCompleting(false)
+  }
+
+  // ── 오늘 일정 ──────────────────────────────────────────
   const todaySchedules = schedules
     .filter(s => s.date === today)
     .sort((a,b) => (a.time||'').localeCompare(b.time||''))
@@ -124,6 +148,29 @@ export default function TodayTab() {
 
   return (
     <div className="page" style={{display:'flex',flexDirection:'column',gap:'16px'}}>
+
+      {/* 전역 토스트 */}
+      {toastField === 'error' && (
+        <div style={{
+          position:'fixed', top:0, left:0, right:0, zIndex:300,
+          background:'#ef4444', color:'#fff',
+          padding:'10px 16px', textAlign:'center',
+          fontSize:'0.88rem', fontWeight:700
+        }}>
+          {toastMsg}
+        </div>
+      )}
+      {toastField === 'complete' && (
+        <div style={{
+          position:'fixed', top:0, left:0, right:0, zIndex:300,
+          background:'var(--mint-600)', color:'#fff',
+          padding:'10px 16px', textAlign:'center',
+          fontSize:'0.88rem', fontWeight:700
+        }}>
+          {toastMsg}
+        </div>
+      )}
+
       <div style={{textAlign:'center',color:'var(--mint-600)',fontWeight:700,fontSize:'0.9rem'}}>
         {today} ({dayKey ? {mon:'월',tue:'화',wed:'수',thu:'목',fri:'금'}[dayKey] : '주말'})
       </div>
@@ -176,9 +223,9 @@ export default function TodayTab() {
         {dayKey && todayLessons.length === 0 && <div className="empty">시간표를 설정해주세요</div>}
         {todayLessons.map((lesson, idx) => (
           <LessonCard
-            key={idx}
+            key={`${lesson.className}-${idx}`}
             lesson={lesson}
-            onComplete={() => completeLesson(lesson)}
+            onComplete={(setCompleting) => completeLesson(lesson, setCompleting)}
             onSaveFields={(fields) => {
               setTodayLessons(prev => prev.map((l,i) => i===idx ? {...l, ...fields} : l))
             }}
@@ -219,10 +266,12 @@ export default function TodayTab() {
   )
 }
 
+// ── LessonCard ─────────────────────────────────────────────────
 function LessonCard({ lesson, onComplete, onSaveFields }) {
   const [editing, setEditing] = useState(false)
   const [draftLast, setDraftLast] = useState('')
   const [draftThis, setDraftThis] = useState('')
+  const [completing, setCompleting] = useState(false)
 
   const startEdit = () => {
     setDraftLast(lesson.editedLastClass ?? lesson.lastClass ?? '')
@@ -240,7 +289,7 @@ function LessonCard({ lesson, onComplete, onSaveFields }) {
   const displayThis = lesson.editedThisClass ?? lesson.thisClass
 
   return (
-    <div className="lesson-card" style={isDone ? {opacity:0.65, borderLeftColor:'var(--mint-300)'} : {}}>
+    <div className="lesson-card" style={isDone ? {opacity:0.7, borderLeftColor:'var(--mint-300)'} : {}}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'4px'}}>
         <div className="lesson-period">{lesson.period}교시</div>
         {isDone && <span className="tag tag-green" style={{fontSize:'0.7rem'}}>✅ 완료</span>}
@@ -252,11 +301,20 @@ function LessonCard({ lesson, onComplete, onSaveFields }) {
         <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
           <div>
             <label style={{fontSize:'0.72rem',color:'var(--gray-500)',display:'block',marginBottom:'3px'}}>지난 시간</label>
-            <input value={draftLast} onChange={e=>setDraftLast(e.target.value)} placeholder="지난 시간 내용" />
+            <input
+              value={draftLast}
+              onChange={e => setDraftLast(e.target.value)}
+              placeholder="지난 시간 내용"
+            />
           </div>
           <div>
             <label style={{fontSize:'0.72rem',color:'var(--gray-500)',display:'block',marginBottom:'3px'}}>이번 시간 계획</label>
-            <input value={draftThis} onChange={e=>setDraftThis(e.target.value)} placeholder="이번 시간 계획" autoFocus />
+            <input
+              value={draftThis}
+              onChange={e => setDraftThis(e.target.value)}
+              placeholder="이번 시간 계획"
+              autoFocus
+            />
           </div>
           <div style={{display:'flex',gap:'8px'}}>
             <button className="btn btn-primary btn-sm" onClick={handleSave}>저장</button>
@@ -274,9 +332,16 @@ function LessonCard({ lesson, onComplete, onSaveFields }) {
             <p>{displayThis || <span style={{color:'var(--gray-300)'}}>미입력</span>}</p>
           </div>
           <div className="lesson-actions">
-            <button className="btn btn-secondary btn-sm" onClick={startEdit}>✏️ 편집</button>
-            <button className="btn btn-primary btn-sm" onClick={onComplete}>
-              ✅ 수업 완료
+            <button className="btn btn-secondary btn-sm" onClick={startEdit}>
+              ✏️ 편집
+            </button>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => onComplete(setCompleting)}
+              disabled={completing}
+              style={completing ? {opacity:0.6} : {}}
+            >
+              {completing ? '저장 중...' : '✅ 수업 완료'}
             </button>
           </div>
         </>

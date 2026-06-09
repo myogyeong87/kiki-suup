@@ -35,11 +35,15 @@ export async function saveWeeklyTimetable(weekKey, data) {
 
 // --- progressLogs ---
 export async function getProgressLogs(className) {
-  const snap = await getDoc(doc(db, 'progressLogs', `${SYNC_ID}_${className}`))
+  const key = `${SYNC_ID}_${className}`
+  const snap = await getDoc(doc(db, 'progressLogs', key))
   return snap.exists() ? (snap.data().logs || []) : []
 }
 export async function saveProgressLog(className, logs) {
-  await setDoc(doc(db, 'progressLogs', `${SYNC_ID}_${className}`), { logs })
+  const key = `${SYNC_ID}_${className}`
+  console.log('[saveProgressLog] path=progressLogs/' + key, 'entries=' + logs.length)
+  await setDoc(doc(db, 'progressLogs', key), { logs })
+  console.log('[saveProgressLog] success')
 }
 
 // --- schedules ---
