@@ -8,6 +8,37 @@ import {
 } from '../firebase'
 import { DAYS, DAY_LABELS, PERIODS, getWeekKey, getWeekDates, getToday, formatDate } from '../utils'
 
+// 시간 입력 컴포넌트 (직접 입력 ↔ 교시 선택 전환)
+const PERIOD_OPTIONS = ['1교시','2교시','3교시','4교시','5교시','6교시','7교시','방과후']
+
+function TimeInput({ value, onChange, mode, onModeChange }) {
+  return (
+    <div style={{display:'flex',gap:'6px',alignItems:'stretch'}}>
+      {mode === 'text' ? (
+        <input
+          type="text"
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder="HH:MM (선택)"
+          style={{flex:1}}
+        />
+      ) : (
+        <select value={value} onChange={e => onChange(e.target.value)} style={{flex:1}}>
+          <option value="">교시 선택</option>
+          {PERIOD_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+      )}
+      <button
+        className="btn btn-secondary btn-sm"
+        onClick={() => { onModeChange(mode === 'text' ? 'period' : 'text'); onChange('') }}
+        style={{flexShrink:0, padding:'0 10px', minHeight:'42px', whiteSpace:'nowrap'}}
+      >
+        {mode === 'text' ? '교시▼' : '직접입력'}
+      </button>
+    </div>
+  )
+}
+
 export default function ManageTab() {
   const [section, setSection] = useState('basic')
 
@@ -44,7 +75,7 @@ export default function ManageTab() {
 function BasicTimetable() {
   const [grid, setGrid] = useState({})
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const [saved,  setSaved]  = useState(false)
 
   useEffect(() => { getBasicTimetable().then(setGrid) }, [])
 
@@ -74,9 +105,9 @@ function BasicTimetable() {
 // ─── 이번 주 시간표 ────────────────────────────────────────────
 function WeeklyTimetable() {
   const weekKey = getWeekKey()
-  const [grid, setGrid] = useState({})
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const [grid,     setGrid]     = useState({})
+  const [saving,   setSaving]   = useState(false)
+  const [saved,    setSaved]    = useState(false)
   const [applying, setApplying] = useState(false)
   const [applyMsg, setApplyMsg] = useState('')
 
@@ -100,12 +131,9 @@ function WeeklyTimetable() {
   }
 
   const applyToProgress = async () => {
-    setApplying(true)
-    setApplyMsg('')
+    setApplying(true); setApplyMsg('')
     try {
       const weekDates = getWeekDates(weekKey)
-
-      // (className → Set<date>) 수집
       const classDateMap = {}
       for (const day of DAYS) {
         const date = weekDates[day]
@@ -130,25 +158,19 @@ function WeeklyTimetable() {
         const logs = await getProgressLogs(cn)
         let changed = false
         for (const date of dates) {
-          const existing = logs.find(l => l.date === date)
-          if (existing) continue // 이미 있으면 skip (완료 포함)
+          if (logs.find(l => l.date === date)) continue
           logs.push({
             id: `${date}-${cn}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-            week: weekKey,
-            date,
-            content: '',
-            status: 'plan',
+            week: weekKey, date, content: '', status: 'plan',
           })
-          changed = true
-          added++
+          changed = true; added++
         }
         if (changed) await saveProgressLog(cn, logs)
       }
 
       setApplyMsg(added > 0 ? `✅ ${added}건 추가됨` : '새로운 항목 없음')
     } catch(e) {
-      setApplyMsg('오류가 발생했습니다')
-      console.error(e)
+      setApplyMsg('오류가 발생했습니다'); console.error(e)
     }
     setApplying(false)
     setTimeout(() => setApplyMsg(''), 3000)
@@ -167,25 +189,19 @@ function WeeklyTimetable() {
         {saving ? '저장 중...' : saved ? '✓ 저장됨' : '저장'}
       </button>
 
-      {/* 진도표에 반영 */}
       <div style={{marginTop:'12px',borderTop:'1px solid var(--gray-100)',paddingTop:'12px'}}>
-        <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
-          <button
-            className="btn btn-secondary w-full"
-            style={{background:'var(--mint-50)',color:'var(--mint-700)',border:'1.5px dashed var(--mint-300)'}}
-            onClick={applyToProgress}
-            disabled={applying}
-          >
-            {applying ? '처리 중...' : '📋 진도표에 반영'}
-          </button>
-        </div>
+        <button
+          className="btn btn-secondary w-full"
+          style={{background:'var(--pink-50)',color:'var(--pink-700)',border:'1.5px dashed var(--pink-300)'}}
+          onClick={applyToProgress}
+          disabled={applying}
+        >
+          {applying ? '처리 중...' : '📋 진도표에 반영'}
+        </button>
         {applyMsg && (
           <div style={{
-            marginTop:'8px',
-            fontSize:'0.82rem',
-            color: applyMsg.startsWith('✅') ? 'var(--mint-600)' : 'var(--gray-500)',
-            textAlign:'center',
-            fontWeight:600
+            marginTop:'8px', fontSize:'0.82rem', textAlign:'center', fontWeight:600,
+            color: applyMsg.startsWith('✅') ? 'var(--pink-600)' : 'var(--gray-500)'
           }}>
             {applyMsg}
           </div>
@@ -205,23 +221,19 @@ function TimetableGrid({ grid, onUpdate }) {
       <div className="tt-grid" style={{gridTemplateColumns:`40px repeat(${DAYS.length},1fr)`,minWidth:'340px'}}>
         <div style={{fontSize:'0.75rem',color:'var(--gray-400)',display:'flex',alignItems:'center',justifyContent:'center'}}>교시</div>
         {DAYS.map(d => (
-          <div key={d} style={{fontSize:'0.78rem',fontWeight:700,color:'var(--mint-600)',textAlign:'center',padding:'4px 0'}}>
+          <div key={d} style={{fontSize:'0.78rem',fontWeight:700,color:'var(--pink-600)',textAlign:'center',padding:'4px 0'}}>
             {DAY_LABELS[d]}
           </div>
         ))}
         {PERIODS.map(p => (
-          <>
-            <div key={`lbl-${p}`} style={{fontSize:'0.78rem',color:'var(--gray-500)',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700}}>{p}</div>
+          <div key={p} style={{display:'contents'}}>
+            <div style={{fontSize:'0.78rem',color:'var(--gray-500)',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700}}>{p}</div>
             {DAYS.map(d => (
               <div key={`${d}-${p}`} className="tt-cell">
-                <input
-                  value={grid[d]?.[p] || ''}
-                  onChange={e => onUpdate(d, p, e.target.value)}
-                  placeholder="-"
-                />
+                <input value={grid[d]?.[p] || ''} onChange={e => onUpdate(d, p, e.target.value)} placeholder="-" />
               </div>
             ))}
-          </>
+          </div>
         ))}
       </div>
     </div>
@@ -230,9 +242,13 @@ function TimetableGrid({ grid, onUpdate }) {
 
 // ─── 일정 관리 ────────────────────────────────────────────────
 function ScheduleManager() {
-  const [items, setItems] = useState([])
-  const [form, setForm] = useState({ date: getToday(), time: '', content: '' })
-  const [saving, setSaving] = useState(false)
+  const [items,        setItems]        = useState([])
+  const [form,         setForm]         = useState({ date: getToday(), time: '', content: '' })
+  const [timeMode,     setTimeMode]     = useState('text')
+  const [saving,       setSaving]       = useState(false)
+  const [editId,       setEditId]       = useState(null)
+  const [editForm,     setEditForm]     = useState({ date:'', time:'', content:'' })
+  const [editTimeMode, setEditTimeMode] = useState('text')
 
   useEffect(() => {
     getSchedules().then(data =>
@@ -251,6 +267,20 @@ function ScheduleManager() {
     setSaving(false)
   }
 
+  const startEdit = (item) => {
+    setEditId(item.id)
+    setEditForm({ date: item.date, time: item.time||'', content: item.content })
+    setEditTimeMode(PERIOD_OPTIONS.includes(item.time||'') ? 'period' : 'text')
+  }
+
+  const saveEdit = async () => {
+    const updated = items.map(i => i.id === editId ? { ...i, ...editForm } : i)
+      .sort((a,b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`))
+    await saveSchedules(updated)
+    setItems(updated)
+    setEditId(null)
+  }
+
   const remove = async (id) => {
     const updated = items.filter(i => i.id !== id)
     await saveSchedules(updated)
@@ -260,31 +290,79 @@ function ScheduleManager() {
   return (
     <section className="card">
       <div className="section-label">📌 일정 관리</div>
+
+      {/* 추가 폼 */}
       <div style={{display:'flex',flexDirection:'column',gap:'8px',marginBottom:'16px'}}>
         <input type="date" value={form.date} onChange={e=>setForm(p=>({...p,date:e.target.value}))} />
-        <input type="time" value={form.time} onChange={e=>setForm(p=>({...p,time:e.target.value}))} placeholder="시간 (선택)" />
-        <input value={form.content} onChange={e=>setForm(p=>({...p,content:e.target.value}))} placeholder="일정 내용" />
+        <TimeInput
+          value={form.time}
+          onChange={v => setForm(p=>({...p,time:v}))}
+          mode={timeMode}
+          onModeChange={setTimeMode}
+        />
+        <input
+          value={form.content}
+          onChange={e=>setForm(p=>({...p,content:e.target.value}))}
+          onKeyDown={e => { if (e.key === 'Enter') add() }}
+          placeholder="일정 내용 — Enter로 추가"
+        />
         <button className="btn btn-primary" onClick={add} disabled={saving}>+ 추가</button>
       </div>
+
+      {/* 목록 */}
       {items.length === 0 && <div className="empty">등록된 일정이 없어요</div>}
-      {items.map(item => (
-        <div key={item.id} className="schedule-item">
-          <div style={{flex:1}}>
-            <div style={{fontSize:'0.78rem',color:'var(--mint-600)',fontWeight:700}}>{formatDate(item.date)} {item.time}</div>
-            <div style={{fontSize:'0.9rem'}}>{item.content}</div>
+      {items.map(item =>
+        editId === item.id ? (
+          /* 인라인 편집 */
+          <div key={item.id} className="inline-edit-card">
+            <input type="date" value={editForm.date} onChange={e=>setEditForm(p=>({...p,date:e.target.value}))} />
+            <TimeInput
+              value={editForm.time}
+              onChange={v => setEditForm(p=>({...p,time:v}))}
+              mode={editTimeMode}
+              onModeChange={setEditTimeMode}
+            />
+            <input
+              value={editForm.content}
+              onChange={e=>setEditForm(p=>({...p,content:e.target.value}))}
+              onKeyDown={e => {
+                if (e.key === 'Enter') saveEdit()
+                if (e.key === 'Escape') setEditId(null)
+              }}
+              placeholder="일정 내용"
+              autoFocus
+            />
+            <div style={{display:'flex',gap:'8px'}}>
+              <button className="btn btn-primary btn-sm" onClick={saveEdit}>저장</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setEditId(null)}>취소</button>
+            </div>
           </div>
-          <button className="btn btn-danger btn-icon" onClick={() => remove(item.id)}>✕</button>
-        </div>
-      ))}
+        ) : (
+          <div key={item.id} className="schedule-item">
+            <div style={{flex:1}}>
+              <div style={{fontSize:'0.78rem',color:'var(--pink-600)',fontWeight:700}}>
+                {formatDate(item.date)}{item.time ? ` ${item.time}` : ''}
+              </div>
+              <div style={{fontSize:'0.9rem'}}>{item.content}</div>
+            </div>
+            <div style={{display:'flex',gap:'4px',alignItems:'center',flexShrink:0}}>
+              <button className="icon-btn icon-btn-edit" onClick={() => startEdit(item)} title="수정">✏️</button>
+              <button className="btn btn-danger btn-icon" onClick={() => remove(item.id)}>✕</button>
+            </div>
+          </div>
+        )
+      )}
     </section>
   )
 }
 
 // ─── 마감 관리 ────────────────────────────────────────────────
 function DeadlineManager() {
-  const [items, setItems] = useState([])
-  const [form, setForm] = useState({ title: '', date: '' })
-  const [saving, setSaving] = useState(false)
+  const [items,    setItems]    = useState([])
+  const [form,     setForm]     = useState({ title: '', date: '' })
+  const [saving,   setSaving]   = useState(false)
+  const [editId,   setEditId]   = useState(null)
+  const [editForm, setEditForm] = useState({ title:'', date:'' })
 
   useEffect(() => {
     getDeadlines().then(data =>
@@ -303,6 +381,19 @@ function DeadlineManager() {
     setSaving(false)
   }
 
+  const startEdit = (item) => {
+    setEditId(item.id)
+    setEditForm({ title: item.title, date: item.date })
+  }
+
+  const saveEdit = async () => {
+    const updated = items.map(i => i.id === editId ? { ...i, ...editForm } : i)
+      .sort((a,b) => a.date.localeCompare(b.date))
+    await saveDeadlines(updated)
+    setItems(updated)
+    setEditId(null)
+  }
+
   const toggle = async (id) => {
     const updated = items.map(i => i.id===id ? {...i,done:!i.done} : i)
     await saveDeadlines(updated)
@@ -318,24 +409,57 @@ function DeadlineManager() {
   return (
     <section className="card">
       <div className="section-label">⏰ 마감 관리</div>
+
+      {/* 추가 폼 */}
       <div style={{display:'flex',flexDirection:'column',gap:'8px',marginBottom:'16px'}}>
-        <input value={form.title} onChange={e=>setForm(p=>({...p,title:e.target.value}))} placeholder="마감 항목 제목" />
+        <input
+          value={form.title}
+          onChange={e=>setForm(p=>({...p,title:e.target.value}))}
+          onKeyDown={e => { if (e.key === 'Enter' && form.date) add() }}
+          placeholder="마감 항목 제목"
+        />
         <input type="date" value={form.date} onChange={e=>setForm(p=>({...p,date:e.target.value}))} />
         <button className="btn btn-primary" onClick={add} disabled={saving}>+ 추가</button>
       </div>
+
+      {/* 목록 */}
       {items.length === 0 && <div className="empty">등록된 마감이 없어요</div>}
-      {items.map(item => (
-        <div key={item.id} className="deadline-item">
-          <button className={`check-circle${item.done?' checked':''}`} onClick={() => toggle(item.id)}>
-            {item.done ? '✓' : ''}
-          </button>
-          <div style={{flex:1}}>
-            <span className={item.done?'strikethrough':''}>{item.title}</span>
-            <div style={{fontSize:'0.75rem',color:'var(--gray-400)'}}>{formatDate(item.date)}</div>
+      {items.map(item =>
+        editId === item.id ? (
+          /* 인라인 편집 */
+          <div key={item.id} className="inline-edit-card">
+            <input
+              value={editForm.title}
+              onChange={e=>setEditForm(p=>({...p,title:e.target.value}))}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && editForm.date) saveEdit()
+                if (e.key === 'Escape') setEditId(null)
+              }}
+              placeholder="마감 항목 제목"
+              autoFocus
+            />
+            <input type="date" value={editForm.date} onChange={e=>setEditForm(p=>({...p,date:e.target.value}))} />
+            <div style={{display:'flex',gap:'8px'}}>
+              <button className="btn btn-primary btn-sm" onClick={saveEdit}>저장</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setEditId(null)}>취소</button>
+            </div>
           </div>
-          <button className="btn btn-danger btn-icon" onClick={() => remove(item.id)}>✕</button>
-        </div>
-      ))}
+        ) : (
+          <div key={item.id} className="deadline-item">
+            <button className={`check-circle${item.done?' checked':''}`} onClick={() => toggle(item.id)}>
+              {item.done ? '✓' : ''}
+            </button>
+            <div style={{flex:1}}>
+              <span className={item.done?'strikethrough':''}>{item.title}</span>
+              <div style={{fontSize:'0.75rem',color:'var(--gray-400)'}}>{formatDate(item.date)}</div>
+            </div>
+            <div style={{display:'flex',gap:'4px',alignItems:'center',flexShrink:0}}>
+              <button className="icon-btn icon-btn-edit" onClick={() => startEdit(item)} title="수정">✏️</button>
+              <button className="btn btn-danger btn-icon" onClick={() => remove(item.id)}>✕</button>
+            </div>
+          </div>
+        )
+      )}
     </section>
   )
 }
