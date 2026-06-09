@@ -95,8 +95,7 @@ export default function TodayTab() {
   }
 
   const completeLesson = async (lesson) => {
-    const content = lesson.editedThisClass ?? lesson.thisClass
-    if (!content) return
+    const content = lesson.editedThisClass ?? lesson.thisClass ?? ''
     const logs = [...lesson.logs]
     const idx = logs.findIndex(l => l.date === today)
     const entry = {
@@ -276,7 +275,7 @@ function LessonCard({ lesson, onComplete, onSaveFields }) {
           </div>
           <div className="lesson-actions">
             <button className="btn btn-secondary btn-sm" onClick={startEdit}>✏️ 편집</button>
-            <button className="btn btn-primary btn-sm" onClick={onComplete} disabled={isDone && !lesson.editedThisClass}>
+            <button className="btn btn-primary btn-sm" onClick={onComplete}>
               ✅ 수업 완료
             </button>
           </div>
