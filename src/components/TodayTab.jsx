@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   getDeadlines, saveDeadlines,
   getHomeroom, saveHomeroom,
@@ -19,7 +19,7 @@ export default function TodayTab() {
   const [todayLessons, setTodayLessons] = useState([])
   const [schedules, setSchedules] = useState([])
   const [loading, setLoading] = useState(true)
-  const [toastField, setToastField] = useState(null) // 'morning' | 'afternoon'
+  const [toastField, setToastField] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -47,13 +47,19 @@ export default function TodayTab() {
         const cn = dayData[String(p)] || dayData[p]
         if (cn && cn.trim()) {
           const logs = await getProgressLogs(cn)
-          const last = logs.length ? logs[logs.length - 1] : null
+          // last done entry before or on today
+          const lastDone = [...logs]
+            .filter(l => l.status === 'done' && l.date <= today)
+            .sort((a,b) => b.date.localeCompare(a.date))[0]
+          // today's entry (plan or done)
+          const todayEntry = logs.find(l => l.date === today) || null
           lessons.push({
             period: p,
             className: cn.trim(),
             logs,
-            lastClass: last?.thisClass || '',
-            thisClass: ''
+            todayEntry,
+            lastClass: lastDone?.content || '',
+            thisClass: todayEntry?.content || '',
           })
         }
       }
@@ -64,8 +70,8 @@ export default function TodayTab() {
 
   useEffect(() => { load() }, [load])
 
-  const toggleDeadline = async (idx) => {
-    const updated = deadlines.map((d, i) => i === idx ? { ...d, done: !d.done } : d)
+  const toggleDeadline = async (realIdx) => {
+    const updated = deadlines.map((d, i) => i === realIdx ? { ...d, done: !d.done } : d)
     setDeadlines(updated)
     await saveDeadlines(updated)
   }
@@ -89,12 +95,21 @@ export default function TodayTab() {
   }
 
   const completeLesson = async (lesson) => {
-    const finalLast = lesson.editedLastClass ?? lesson.lastClass
-    const finalThis = lesson.editedThisClass ?? lesson.thisClass
-    if (!finalThis) return
-    const newEntry = { date: today, lastClass: finalLast, thisClass: finalThis }
-    const updatedLogs = [...lesson.logs, newEntry]
-    await saveProgressLog(lesson.className, updatedLogs)
+    const content = lesson.editedThisClass ?? lesson.thisClass
+    if (!content) return
+    const logs = [...lesson.logs]
+    const idx = logs.findIndex(l => l.date === today)
+    const entry = {
+      id: idx >= 0 ? logs[idx].id : `${today}-${lesson.className}-${Date.now()}`,
+      week: weekKey,
+      date: today,
+      content,
+      lastClassNote: lesson.editedLastClass ?? lesson.lastClass,
+      status: 'done'
+    }
+    if (idx >= 0) logs[idx] = entry
+    else logs.push(entry)
+    await saveProgressLog(lesson.className, logs)
     await load()
   }
 
@@ -104,26 +119,28 @@ export default function TodayTab() {
 
   if (loading) return (
     <div className="page" style={{display:'flex',alignItems:'center',justifyContent:'center'}}>
-      <span style={{color:'var(--purple-400)'}}>불러오는 중... ✨</span>
+      <span style={{color:'var(--mint-400)'}}>불러오는 중... ✨</span>
     </div>
   )
 
   return (
     <div className="page" style={{display:'flex',flexDirection:'column',gap:'16px'}}>
-      <div style={{textAlign:'center',color:'var(--purple-600)',fontWeight:700,fontSize:'0.9rem'}}>
+      <div style={{textAlign:'center',color:'var(--mint-600)',fontWeight:700,fontSize:'0.9rem'}}>
         {today} ({dayKey ? {mon:'월',tue:'화',wed:'수',thu:'목',fri:'금'}[dayKey] : '주말'})
       </div>
 
+      {/* 마감 임박 */}
       {urgentDeadlines.length > 0 && (
         <section className="card">
           <div className="section-label">⏰ 마감 임박</div>
           {urgentDeadlines.map((d, i) => {
+            const realIdx = deadlines.indexOf(d)
             const diff = daysUntil(d.date)
             const tagCls = diff <= 3 ? 'tag-red' : 'tag-yellow'
             const label = diff === 0 ? 'D-Day' : `D-${diff}`
             return (
               <div key={i} className="deadline-item">
-                <button className={`check-circle${d.done?' checked':''}`} onClick={() => toggleDeadline(deadlines.indexOf(d))}>
+                <button className={`check-circle${d.done?' checked':''}`} onClick={() => toggleDeadline(realIdx)}>
                   {d.done ? '✓' : ''}
                 </button>
                 <div style={{flex:1}}>
@@ -137,6 +154,7 @@ export default function TodayTab() {
         </section>
       )}
 
+      {/* 조회 메모 */}
       <section className="card">
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'10px'}}>
           <div className="section-label" style={{margin:0}}>🌅 조회 메모</div>
@@ -152,12 +170,11 @@ export default function TodayTab() {
         />
       </section>
 
+      {/* 오늘 수업 */}
       <section className="card">
         <div className="section-label">📚 오늘 수업</div>
         {!dayKey && <div className="empty">오늘은 수업이 없어요 🎉</div>}
-        {dayKey && todayLessons.length === 0 && (
-          <div className="empty">시간표를 설정해주세요</div>
-        )}
+        {dayKey && todayLessons.length === 0 && <div className="empty">시간표를 설정해주세요</div>}
         {todayLessons.map((lesson, idx) => (
           <LessonCard
             key={idx}
@@ -170,6 +187,7 @@ export default function TodayTab() {
         ))}
       </section>
 
+      {/* 오늘 일정 */}
       <section className="card">
         <div className="section-label">📌 오늘 일정</div>
         {todaySchedules.length === 0
@@ -183,6 +201,7 @@ export default function TodayTab() {
         }
       </section>
 
+      {/* 종례 메모 */}
       <section className="card">
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'10px'}}>
           <div className="section-label" style={{margin:0}}>🌇 종례 메모</div>
@@ -217,38 +236,32 @@ function LessonCard({ lesson, onComplete, onSaveFields }) {
     setEditing(false)
   }
 
-  const handleCancel = () => setEditing(false)
-
+  const isDone = lesson.todayEntry?.status === 'done'
   const displayLast = lesson.editedLastClass ?? lesson.lastClass
   const displayThis = lesson.editedThisClass ?? lesson.thisClass
 
   return (
-    <div className="lesson-card">
-      <div className="lesson-period">{lesson.period}교시</div>
+    <div className="lesson-card" style={isDone ? {opacity:0.65, borderLeftColor:'var(--mint-300)'} : {}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'4px'}}>
+        <div className="lesson-period">{lesson.period}교시</div>
+        {isDone && <span className="tag tag-green" style={{fontSize:'0.7rem'}}>✅ 완료</span>}
+        {lesson.todayEntry?.status === 'plan' && <span className="tag tag-mint" style={{fontSize:'0.7rem'}}>📌 계획</span>}
+      </div>
       <div className="lesson-class">{lesson.className}</div>
 
       {editing ? (
         <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
           <div>
             <label style={{fontSize:'0.72rem',color:'var(--gray-500)',display:'block',marginBottom:'3px'}}>지난 시간</label>
-            <input
-              value={draftLast}
-              onChange={e => setDraftLast(e.target.value)}
-              placeholder="지난 시간 내용"
-            />
+            <input value={draftLast} onChange={e=>setDraftLast(e.target.value)} placeholder="지난 시간 내용" />
           </div>
           <div>
             <label style={{fontSize:'0.72rem',color:'var(--gray-500)',display:'block',marginBottom:'3px'}}>이번 시간 계획</label>
-            <input
-              value={draftThis}
-              onChange={e => setDraftThis(e.target.value)}
-              placeholder="이번 시간 계획"
-              autoFocus
-            />
+            <input value={draftThis} onChange={e=>setDraftThis(e.target.value)} placeholder="이번 시간 계획" autoFocus />
           </div>
           <div style={{display:'flex',gap:'8px'}}>
             <button className="btn btn-primary btn-sm" onClick={handleSave}>저장</button>
-            <button className="btn btn-secondary btn-sm" onClick={handleCancel}>취소</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setEditing(false)}>취소</button>
           </div>
         </div>
       ) : (
@@ -263,7 +276,9 @@ function LessonCard({ lesson, onComplete, onSaveFields }) {
           </div>
           <div className="lesson-actions">
             <button className="btn btn-secondary btn-sm" onClick={startEdit}>✏️ 편집</button>
-            <button className="btn btn-primary btn-sm" onClick={onComplete}>✅ 수업 완료</button>
+            <button className="btn btn-primary btn-sm" onClick={onComplete} disabled={isDone && !lesson.editedThisClass}>
+              ✅ 수업 완료
+            </button>
           </div>
         </>
       )}

@@ -11,7 +11,7 @@ export function getToday() {
 }
 
 export function getTodayDayKey() {
-  const day = new Date().getDay() // 0=Sun
+  const day = new Date().getDay()
   const map = [null,'mon','tue','wed','thu','fri',null]
   return map[day] ?? null
 }
@@ -20,9 +20,29 @@ export function getWeekKey(dateStr) {
   const d = dateStr ? new Date(dateStr) : new Date()
   const jan1 = new Date(d.getFullYear(), 0, 1)
   const dayOfYear = Math.floor((d - jan1) / 86400000)
-  const dow = (d.getDay() + 6) % 7 // Mon=0
+  const dow = (d.getDay() + 6) % 7
   const weekNum = Math.floor((dayOfYear - dow + 10) / 7)
   return `${d.getFullYear()}-W${String(weekNum).padStart(2,'0')}`
+}
+
+// Returns { mon: 'YYYY-MM-DD', tue: ..., ... } for a given weekKey
+export function getWeekDates(weekKey) {
+  const [yearStr, weekPart] = weekKey.split('-W')
+  const year = parseInt(yearStr)
+  const week = parseInt(weekPart)
+  // ISO 8601: week 1 contains Jan 4
+  const jan4 = new Date(year, 0, 4)
+  const dow = (jan4.getDay() + 6) % 7 // Mon=0
+  const firstMonday = new Date(jan4)
+  firstMonday.setDate(jan4.getDate() - dow + (week - 1) * 7)
+  const result = {}
+  const dayKeys = ['mon','tue','wed','thu','fri']
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(firstMonday)
+    d.setDate(firstMonday.getDate() + i)
+    result[dayKeys[i]] = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+  }
+  return result
 }
 
 export function daysUntil(dateStr) {
