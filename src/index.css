@@ -1,15 +1,15 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --purple-50: #f5f3ff;
-  --purple-100: #ede9fe;
-  --purple-200: #ddd6fe;
-  --purple-300: #c4b5fd;
-  --purple-400: #a78bfa;
-  --purple-500: #8b5cf6;
-  --purple-600: #7c3aed;
-  --purple-700: #6d28d9;
-  --purple-800: #5b21b6;
+  --purple-50: #f8f7ff;
+  --purple-100: #eeeafc;
+  --purple-200: #dfd8f8;
+  --purple-300: #c8bdf2;
+  --purple-400: #b0a0e8;
+  --purple-500: #9580db;
+  --purple-600: #7d66cc;
+  --purple-700: #6654b0;
+  --purple-800: #524494;
   --red-400: #f87171;
   --red-500: #ef4444;
   --yellow-400: #facc15;
@@ -185,7 +185,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--purple-400); }
 
 /* header */
 .app-header {
-  background: linear-gradient(135deg, var(--purple-600), var(--purple-500));
+  background: linear-gradient(135deg, #8b75c9, #a898e0);
   color: var(--white);
   padding: 16px 20px 12px;
   text-align: center;
@@ -349,3 +349,17 @@ input:focus, textarea:focus, select:focus { border-color: var(--purple-400); }
 .text-gray { color: var(--gray-500); }
 .text-red { color: var(--red-500); }
 .strikethrough { text-decoration: line-through; opacity: 0.5; }
+
+/* log-row edit mode */
+.log-row.editing { background: var(--purple-50); border-radius: 8px; padding: 8px; }
+
+/* save toast */
+.save-toast {
+  font-size: 0.75rem;
+  color: var(--purple-600);
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+.save-toast.visible { opacity: 1; }

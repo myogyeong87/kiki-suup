@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   getDeadlines, saveDeadlines,
   getHomeroom, saveHomeroom,
@@ -16,10 +16,10 @@ export default function TodayTab() {
   const [deadlines, setDeadlines] = useState([])
   const [homeroom, setHomeroom] = useState({ morning: '', afternoon: '' })
   const [homeroomDraft, setHomeroomDraft] = useState({ morning: '', afternoon: '' })
-  const [todayLessons, setTodayLessons] = useState([]) // [{period, className, lastClass, thisClass}]
+  const [todayLessons, setTodayLessons] = useState([])
   const [schedules, setSchedules] = useState([])
-  const [editLesson, setEditLesson] = useState(null) // {period, className, field, value}
   const [loading, setLoading] = useState(true)
+  const [toastField, setToastField] = useState(null) // 'morning' | 'afternoon'
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -38,7 +38,6 @@ export default function TodayTab() {
 
       if (!dayKey) { setTodayLessons([]); setLoading(false); return }
 
-      // pick timetable: weekly overrides basic
       const dayData = (weekly[dayKey] && Object.keys(weekly[dayKey]).length)
         ? weekly[dayKey]
         : (basic[dayKey] || {})
@@ -54,7 +53,7 @@ export default function TodayTab() {
             className: cn.trim(),
             logs,
             lastClass: last?.thisClass || '',
-            thisClass: last?.thisClassNext || ''
+            thisClass: ''
           })
         }
       }
@@ -65,7 +64,6 @@ export default function TodayTab() {
 
   useEffect(() => { load() }, [load])
 
-  // --- deadlines ---
   const toggleDeadline = async (idx) => {
     const updated = deadlines.map((d, i) => i === idx ? { ...d, done: !d.done } : d)
     setDeadlines(updated)
@@ -78,27 +76,28 @@ export default function TodayTab() {
     return diff >= 0 && diff <= 7
   }).sort((a,b) => a.date.localeCompare(b.date))
 
-  // --- homeroom save ---
+  const showToast = (field) => {
+    setToastField(field)
+    setTimeout(() => setToastField(null), 2000)
+  }
+
   const saveHomeroomField = async (field, value) => {
     const updated = { ...homeroom, [field]: value }
     setHomeroom(updated)
     await saveHomeroom(today, updated)
+    showToast(field)
   }
 
-  // --- lesson complete ---
   const completeLesson = async (lesson) => {
-    if (!lesson.editedThisClass && !lesson.thisClass) return
-    const newEntry = {
-      date: today,
-      lastClass: lesson.lastClass,
-      thisClass: lesson.editedThisClass ?? lesson.thisClass
-    }
+    const finalLast = lesson.editedLastClass ?? lesson.lastClass
+    const finalThis = lesson.editedThisClass ?? lesson.thisClass
+    if (!finalThis) return
+    const newEntry = { date: today, lastClass: finalLast, thisClass: finalThis }
     const updatedLogs = [...lesson.logs, newEntry]
     await saveProgressLog(lesson.className, updatedLogs)
     await load()
   }
 
-  // --- today schedules ---
   const todaySchedules = schedules
     .filter(s => s.date === today)
     .sort((a,b) => (a.time||'').localeCompare(b.time||''))
@@ -111,12 +110,10 @@ export default function TodayTab() {
 
   return (
     <div className="page" style={{display:'flex',flexDirection:'column',gap:'16px'}}>
-      {/* 날짜 */}
       <div style={{textAlign:'center',color:'var(--purple-600)',fontWeight:700,fontSize:'0.9rem'}}>
         {today} ({dayKey ? {mon:'월',tue:'화',wed:'수',thu:'목',fri:'금'}[dayKey] : '주말'})
       </div>
 
-      {/* 마감 임박 */}
       {urgentDeadlines.length > 0 && (
         <section className="card">
           <div className="section-label">⏰ 마감 임박</div>
@@ -140,9 +137,11 @@ export default function TodayTab() {
         </section>
       )}
 
-      {/* 조회 메모 */}
       <section className="card">
-        <div className="section-label">🌅 조회 메모</div>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'10px'}}>
+          <div className="section-label" style={{margin:0}}>🌅 조회 메모</div>
+          <span className={`save-toast${toastField==='morning'?' visible':''}`}>저장됨 ✓</span>
+        </div>
         <textarea
           rows={3}
           placeholder="조회 시간 메모를 입력하세요..."
@@ -153,7 +152,6 @@ export default function TodayTab() {
         />
       </section>
 
-      {/* 오늘 수업 */}
       <section className="card">
         <div className="section-label">📚 오늘 수업</div>
         {!dayKey && <div className="empty">오늘은 수업이 없어요 🎉</div>}
@@ -165,20 +163,13 @@ export default function TodayTab() {
             key={idx}
             lesson={lesson}
             onComplete={() => completeLesson(lesson)}
-            onEdit={(field, value) => {
-              setTodayLessons(prev => prev.map((l,i) =>
-                i === idx ? {...l, [field]: value} : l
-              ))
-            }}
-            onSaveThisClass={async (value) => {
-              const updatedLesson = {...lesson, editedThisClass: value}
-              setTodayLessons(prev => prev.map((l,i) => i===idx ? updatedLesson : l))
+            onSaveFields={(fields) => {
+              setTodayLessons(prev => prev.map((l,i) => i===idx ? {...l, ...fields} : l))
             }}
           />
         ))}
       </section>
 
-      {/* 오늘 일정 */}
       <section className="card">
         <div className="section-label">📌 오늘 일정</div>
         {todaySchedules.length === 0
@@ -192,9 +183,11 @@ export default function TodayTab() {
         }
       </section>
 
-      {/* 종례 메모 */}
       <section className="card">
-        <div className="section-label">🌇 종례 메모</div>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'10px'}}>
+          <div className="section-label" style={{margin:0}}>🌇 종례 메모</div>
+          <span className={`save-toast${toastField==='afternoon'?' visible':''}`}>저장됨 ✓</span>
+        </div>
         <textarea
           rows={3}
           placeholder="종례 시간 메모를 입력하세요..."
@@ -208,49 +201,72 @@ export default function TodayTab() {
   )
 }
 
-function LessonCard({ lesson, onComplete, onEdit, onSaveThisClass }) {
+function LessonCard({ lesson, onComplete, onSaveFields }) {
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(lesson.editedThisClass ?? lesson.thisClass ?? '')
+  const [draftLast, setDraftLast] = useState('')
+  const [draftThis, setDraftThis] = useState('')
+
+  const startEdit = () => {
+    setDraftLast(lesson.editedLastClass ?? lesson.lastClass ?? '')
+    setDraftThis(lesson.editedThisClass ?? lesson.thisClass ?? '')
+    setEditing(true)
+  }
 
   const handleSave = () => {
-    onSaveThisClass(draft)
+    onSaveFields({ editedLastClass: draftLast, editedThisClass: draftThis })
     setEditing(false)
   }
+
+  const handleCancel = () => setEditing(false)
+
+  const displayLast = lesson.editedLastClass ?? lesson.lastClass
+  const displayThis = lesson.editedThisClass ?? lesson.thisClass
 
   return (
     <div className="lesson-card">
       <div className="lesson-period">{lesson.period}교시</div>
       <div className="lesson-class">{lesson.className}</div>
-      <div className="lesson-field">
-        <label>지난 시간</label>
-        <p>{lesson.lastClass || <span style={{color:'var(--gray-300)'}}>기록 없음</span>}</p>
-      </div>
-      <div className="lesson-field" style={{marginTop:'8px'}}>
-        <label>이번 시간 계획</label>
-        {editing ? (
-          <div style={{display:'flex',gap:'6px',marginTop:'4px'}}>
+
+      {editing ? (
+        <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+          <div>
+            <label style={{fontSize:'0.72rem',color:'var(--gray-500)',display:'block',marginBottom:'3px'}}>지난 시간</label>
             <input
-              value={draft}
-              onChange={e => setDraft(e.target.value)}
-              placeholder="이번 시간 내용 입력"
+              value={draftLast}
+              onChange={e => setDraftLast(e.target.value)}
+              placeholder="지난 시간 내용"
+            />
+          </div>
+          <div>
+            <label style={{fontSize:'0.72rem',color:'var(--gray-500)',display:'block',marginBottom:'3px'}}>이번 시간 계획</label>
+            <input
+              value={draftThis}
+              onChange={e => setDraftThis(e.target.value)}
+              placeholder="이번 시간 계획"
               autoFocus
             />
-            <button className="btn btn-primary btn-sm" onClick={handleSave}>저장</button>
           </div>
-        ) : (
-          <p>{(lesson.editedThisClass ?? lesson.thisClass) || <span style={{color:'var(--gray-300)'}}>미입력</span>}</p>
-        )}
-      </div>
-      <div className="lesson-actions">
-        {!editing && (
-          <button className="btn btn-secondary btn-sm" onClick={() => { setDraft(lesson.editedThisClass ?? lesson.thisClass ?? ''); setEditing(true) }}>
-            ✏️ 편집
-          </button>
-        )}
-        <button className="btn btn-primary btn-sm" onClick={onComplete}>
-          ✅ 수업 완료
-        </button>
-      </div>
+          <div style={{display:'flex',gap:'8px'}}>
+            <button className="btn btn-primary btn-sm" onClick={handleSave}>저장</button>
+            <button className="btn btn-secondary btn-sm" onClick={handleCancel}>취소</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="lesson-field">
+            <label>지난 시간</label>
+            <p>{displayLast || <span style={{color:'var(--gray-300)'}}>기록 없음</span>}</p>
+          </div>
+          <div className="lesson-field" style={{marginTop:'8px'}}>
+            <label>이번 시간 계획</label>
+            <p>{displayThis || <span style={{color:'var(--gray-300)'}}>미입력</span>}</p>
+          </div>
+          <div className="lesson-actions">
+            <button className="btn btn-secondary btn-sm" onClick={startEdit}>✏️ 편집</button>
+            <button className="btn btn-primary btn-sm" onClick={onComplete}>✅ 수업 완료</button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
