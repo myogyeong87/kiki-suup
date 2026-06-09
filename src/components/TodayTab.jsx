@@ -109,17 +109,17 @@ export default function TodayTab() {
     try {
       // 항상 Firestore 최신 데이터를 가져온 뒤 저장 (stale data 방지)
       const freshLogs = await getProgressLogs(lesson.className)
-      const content = lesson.editedThisClass ?? lesson.thisClass ?? ''
+      const content       = (lesson.editedThisClass ?? lesson.thisClass) || ''
+      const lastClassNote = (lesson.editedLastClass  ?? lesson.lastClass) || ''
       const idx = freshLogs.findIndex(l => l.date === today)
+      // undefined가 포함되지 않도록 모든 필드를 명시적으로 지정
       const entry = {
-        id: idx >= 0
-          ? freshLogs[idx].id
-          : `${today}-${lesson.className}-${Date.now()}`,
-        week: weekKey,
-        date: today,
+        id:           (idx >= 0 && freshLogs[idx].id) || `${today}-${lesson.className}-${Date.now()}`,
+        week:         weekKey || '',
+        date:         today,
         content,
-        lastClassNote: lesson.editedLastClass ?? lesson.lastClass ?? '',
-        status: 'done',
+        lastClassNote,
+        status:       'done',
       }
       const updatedLogs = [...freshLogs]
       if (idx >= 0) updatedLogs[idx] = entry

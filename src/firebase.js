@@ -39,11 +39,29 @@ export async function getProgressLogs(className) {
   const snap = await getDoc(doc(db, 'progressLogs', key))
   return snap.exists() ? (snap.data().logs || []) : []
 }
+
+// Firestore는 undefined 값을 허용하지 않으므로 저장 전 모든 항목을 정제한다.
+function sanitizeLogs(logs) {
+  return (logs || []).map((entry, i) => {
+    // undefined 제거: JSON 왕복으로 undefined 키 제거
+    const base = JSON.parse(JSON.stringify(entry || {}))
+    // 필수 필드 보완
+    if (!base.id)     base.id     = `auto-${Date.now()}-${i}`
+    if (!base.date)   base.date   = ''
+    if (!base.status) base.status = 'plan'
+    if (base.content      === undefined) base.content      = ''
+    if (base.lastClassNote === undefined) base.lastClassNote = ''
+    return base
+  })
+}
+
 export async function saveProgressLog(className, logs) {
   const key = `${SYNC_ID}_${className}`
-  console.log('[saveProgressLog] path=progressLogs/' + key, 'entries=' + logs.length)
-  await setDoc(doc(db, 'progressLogs', key), { logs })
-  console.log('[saveProgressLog] success')
+  const sanitized = sanitizeLogs(logs)
+  console.log('[saveProgressLog] key:', key)
+  console.log('[saveProgressLog] data:', JSON.stringify(sanitized))
+  await setDoc(doc(db, 'progressLogs', key), { logs: sanitized })
+  console.log('[saveProgressLog] success ✓')
 }
 
 // --- schedules ---
