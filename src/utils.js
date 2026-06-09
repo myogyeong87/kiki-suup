@@ -63,17 +63,45 @@ export function getWeekDates(weekKey) {
 }
 
 export function daysUntil(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number)
-  const target = new Date(y, m - 1, d)
-  const [ty, tm, td] = getToday().split('-').map(Number)
-  const today = new Date(ty, tm - 1, td)
-  return Math.ceil((target - today) / 86400000)
+  return daysUntilFrom(dateStr, getToday())
+}
+
+export function daysUntilFrom(deadlineDate, fromDate) {
+  const [y,  m,  d]  = deadlineDate.split('-').map(Number)
+  const [fy, fm, fd] = fromDate.split('-').map(Number)
+  const target = new Date(y,  m  - 1, d)
+  const from   = new Date(fy, fm - 1, fd)
+  return Math.ceil((target - from) / 86400000)
 }
 
 export function formatDate(dateStr) {
   if (!dateStr) return ''
   const [, m, d] = dateStr.split('-')
   return `${m}/${d}`
+}
+
+export function formatDateKorean(dateStr) {
+  if (!dateStr) return ''
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  const dayNames = ['일', '월', '화', '수', '목', '금', '토']
+  return `${y}년 ${m}월 ${d}일 (${dayNames[dt.getDay()]})`
+}
+
+// 다음 평일 (토/일 자동 스킵)
+export function nextWeekday(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  do { dt.setDate(dt.getDate() + 1) } while ([0, 6].includes(dt.getDay()))
+  return toDateStr(dt)
+}
+
+// 이전 평일 (토/일 자동 스킵)
+export function prevWeekday(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  do { dt.setDate(dt.getDate() - 1) } while ([0, 6].includes(dt.getDay()))
+  return toDateStr(dt)
 }
 
 export function uniqueClasses(timetable) {

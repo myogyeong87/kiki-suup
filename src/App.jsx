@@ -22,8 +22,8 @@ export default function App() {
       </header>
 
       <main style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
-        {tab === 'today'    && <DayTab date={getToday()} />}
-        {tab === 'tomorrow' && <DayTab date={getTomorrow()} />}
+        {tab === 'today'    && <DayTab initialDate={getToday()} />}
+        {tab === 'tomorrow' && <DayTab initialDate={getTomorrow()} navigable={true} />}
         {tab === 'progress' && <ProgressTab />}
         {tab === 'manage'   && <ManageTab />}
       </main>

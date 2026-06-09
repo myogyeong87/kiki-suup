@@ -8,25 +8,30 @@ import {
 } from '../firebase'
 import {
   getToday, getDayKeyFromDate, getWeekKey,
-  daysUntil, formatDate, PERIODS, DAY_LABELS
+  daysUntilFrom, formatDate, formatDateKorean,
+  nextWeekday, prevWeekday,
+  PERIODS, DAY_LABELS
 } from '../utils'
 
-// date: 'YYYY-MM-DD' (오늘 또는 내일)
-export default function DayTab({ date }) {
-  const isToday  = date === getToday()
-  const dayLabel = isToday ? '오늘' : '내일'
-  const weekKey  = getWeekKey(date)
-  const dayKey   = getDayKeyFromDate(date)
-  const dayName  = dayKey ? DAY_LABELS[dayKey] : '주말'
+// initialDate: 'YYYY-MM-DD'
+// navigable: true → 내일 탭 (날짜 이동 가능), false → 오늘 탭
+export default function DayTab({ initialDate, navigable = false }) {
+  const [date, setDate] = useState(initialDate)
 
-  const [deadlines,     setDeadlines]     = useState([])
-  const [homeroom,      setHomeroom]      = useState({ morning: '', afternoon: '' })
-  const [homeroomDraft, setHomeroomDraft] = useState({ morning: '', afternoon: '' })
-  const [lessons,       setLessons]       = useState([])
-  const [schedules,     setSchedules]     = useState([])
-  const [loading,       setLoading]       = useState(true)
-  const [toastField,    setToastField]    = useState(null)
-  const [toastMsg,      setToastMsg]      = useState('')
+  const isToday = date === getToday()
+  const weekKey = getWeekKey(date)
+  const dayKey  = getDayKeyFromDate(date)
+  const dayName = dayKey ? DAY_LABELS[dayKey] : '주말'
+
+  const [deadlines,        setDeadlines]       = useState([])
+  const [homeroom,         setHomeroom]         = useState({ morning: '', afternoon: '' })
+  const [homeroomDraft,    setHomeroomDraft]    = useState({ morning: '', afternoon: '' })
+  const [lessons,          setLessons]          = useState([])
+  const [schedules,        setSchedules]        = useState([])
+  const [loading,          setLoading]          = useState(true)
+  const [toastField,       setToastField]       = useState(null)
+  const [toastMsg,         setToastMsg]         = useState('')
+  const [showAllDeadlines, setShowAllDeadlines] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -54,7 +59,6 @@ export default function DayTab({ date }) {
         const cn = dayData[String(p)] || dayData[p]
         if (cn && cn.trim()) {
           const logs = await getProgressLogs(cn)
-          // 해당 날짜 이전 마지막 완료 항목 → "지난 시간"
           const lastDone = [...logs]
             .filter(l => l.status === 'done' && l.date < date)
             .sort((a, b) => b.date.localeCompare(a.date))[0]
@@ -77,6 +81,9 @@ export default function DayTab({ date }) {
 
   useEffect(() => { load() }, [load])
 
+  // 날짜 변경 시 전체보기 리셋
+  useEffect(() => { setShowAllDeadlines(false) }, [date])
+
   // ── 마감 임박 ──────────────────────────────────────────────
   const toggleDeadline = async (realIdx) => {
     const updated = deadlines.map((d, i) => i === realIdx ? { ...d, done: !d.done } : d)
@@ -84,11 +91,13 @@ export default function DayTab({ date }) {
     await saveDeadlines(updated)
   }
 
-  const urgentDeadlines = deadlines.filter(d => {
-    if (d.done) return false
-    const diff = daysUntil(d.date)
-    return diff >= 0 && diff <= 7
-  }).sort((a, b) => a.date.localeCompare(b.date))
+  const allPending = deadlines
+    .filter(d => !d.done && daysUntilFrom(d.date, date) >= 0)
+    .sort((a, b) => a.date.localeCompare(b.date))
+
+  const urgentDeadlines = showAllDeadlines
+    ? allPending
+    : allPending.filter(d => daysUntilFrom(d.date, date) <= 7)
 
   // ── 토스트 ─────────────────────────────────────────────────
   const showToast = (field, msg = '') => {
@@ -110,21 +119,21 @@ export default function DayTab({ date }) {
     }
   }
 
-  // ── 수업 완료 ───────────────────────────────────────────────
+  // ── 수업 완료/계획 저장 ────────────────────────────────────
   const completeLesson = async (lesson, setCompleting) => {
     setCompleting(true)
     try {
-      const freshLogs   = await getProgressLogs(lesson.className)
-      const content     = (lesson.editedThisClass ?? lesson.thisClass) || ''
-      const lastNote    = (lesson.editedLastClass  ?? lesson.lastClass) || ''
-      const idx         = freshLogs.findIndex(l => l.date === date)
+      const freshLogs = await getProgressLogs(lesson.className)
+      const content   = (lesson.editedThisClass ?? lesson.thisClass) || ''
+      const lastNote  = (lesson.editedLastClass  ?? lesson.lastClass) || ''
+      const idx       = freshLogs.findIndex(l => l.date === date)
       const entry = {
-        id:           (idx >= 0 && freshLogs[idx].id) || `${date}-${lesson.className}-${Date.now()}`,
-        week:         weekKey,
+        id:            (idx >= 0 && freshLogs[idx].id) || `${date}-${lesson.className}-${Date.now()}`,
+        week:          weekKey,
         date,
         content,
         lastClassNote: lastNote,
-        status:       'done',
+        status:        'done',
       }
       const updated = [...freshLogs]
       if (idx >= 0) updated[idx] = entry
@@ -140,10 +149,13 @@ export default function DayTab({ date }) {
     setCompleting(false)
   }
 
-  // ── 오늘/내일 일정 ─────────────────────────────────────────
+  // ── 일정 ───────────────────────────────────────────────────
   const daySchedules = schedules
     .filter(s => s.date === date)
     .sort((a, b) => (a.time || '').localeCompare(b.time || ''))
+
+  // 수업/일정/메모 레이블 (오늘 or 요일명)
+  const lbl = isToday ? '오늘' : dayName
 
   if (loading) return (
     <div className="page" style={{ display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -154,7 +166,7 @@ export default function DayTab({ date }) {
   return (
     <div className="page" style={{ display:'flex', flexDirection:'column', gap:'16px' }}>
 
-      {/* 전역 토스트 */}
+      {/* 토스트 */}
       {toastField === 'error' && (
         <div style={{
           position:'fixed', top:0, left:0, right:0, zIndex:300,
@@ -172,27 +184,76 @@ export default function DayTab({ date }) {
         }}>{toastMsg}</div>
       )}
 
-      {/* 날짜 헤더 */}
-      <div style={{ textAlign:'center', color:'var(--mint-600)', fontWeight:700, fontSize:'0.9rem' }}>
-        {date} ({dayName})
-        {!isToday && (
-          <span style={{
-            marginLeft:'8px', fontSize:'0.75rem',
-            background:'var(--mint-100)', color:'var(--mint-700)',
-            padding:'2px 8px', borderRadius:'20px', fontWeight:700
-          }}>내일</span>
-        )}
-      </div>
+      {/* 날짜 네비게이터 (내일 탭) */}
+      {navigable ? (
+        <div style={{
+          display:'flex', alignItems:'center', justifyContent:'space-between',
+          background:'var(--white)', borderRadius:'14px', padding:'10px 16px',
+          boxShadow:'0 1px 6px rgba(45,136,128,0.07)'
+        }}>
+          <button
+            onClick={() => setDate(prevWeekday(date))}
+            style={{
+              width:'36px', height:'36px', borderRadius:'10px',
+              background:'var(--mint-100)', color:'var(--mint-700)',
+              fontSize:'1.2rem', fontWeight:700,
+              display:'flex', alignItems:'center', justifyContent:'center'
+            }}
+          >‹</button>
+          <div style={{ textAlign:'center' }}>
+            <div style={{ fontWeight:700, color:'var(--mint-700)', fontSize:'0.92rem' }}>
+              {formatDateKorean(date)}
+            </div>
+            {isToday && (
+              <span style={{
+                display:'inline-block', marginTop:'3px',
+                fontSize:'0.68rem', background:'var(--mint-500)', color:'white',
+                padding:'1px 8px', borderRadius:'20px', fontWeight:700
+              }}>오늘</span>
+            )}
+          </div>
+          <button
+            onClick={() => setDate(nextWeekday(date))}
+            style={{
+              width:'36px', height:'36px', borderRadius:'10px',
+              background:'var(--mint-100)', color:'var(--mint-700)',
+              fontSize:'1.2rem', fontWeight:700,
+              display:'flex', alignItems:'center', justifyContent:'center'
+            }}
+          >›</button>
+        </div>
+      ) : (
+        /* 오늘 탭 날짜 헤더 */
+        <div style={{ textAlign:'center', color:'var(--mint-600)', fontWeight:700, fontSize:'0.9rem' }}>
+          {formatDateKorean(date)}
+        </div>
+      )}
 
       {/* 마감 임박 */}
-      {urgentDeadlines.length > 0 && (
+      {allPending.length > 0 && (
         <section className="card">
-          <div className="section-label">⏰ 마감 임박</div>
-          {urgentDeadlines.map((d, i) => {
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
+            <div className="section-label" style={{ margin:0 }}>⏰ 마감 임박</div>
+            <button
+              onClick={() => setShowAllDeadlines(p => !p)}
+              style={{
+                fontSize:'0.72rem', color:'var(--mint-600)',
+                background:'var(--mint-100)', padding:'3px 10px',
+                borderRadius:'20px', fontWeight:600
+              }}
+            >
+              {showAllDeadlines
+                ? '접기'
+                : `전체 보기 (${allPending.length})`}
+            </button>
+          </div>
+          {urgentDeadlines.length === 0 ? (
+            <div className="empty" style={{ padding:'8px 0' }}>D-7 이내 마감 없음</div>
+          ) : urgentDeadlines.map((d, i) => {
             const realIdx = deadlines.indexOf(d)
-            const diff = daysUntil(d.date)
-            const tagCls = diff <= 3 ? 'tag-red' : 'tag-yellow'
-            const label  = diff === 0 ? 'D-Day' : `D-${diff}`
+            const diff    = daysUntilFrom(d.date, date)
+            const tagCls  = diff <= 3 ? 'tag-red' : 'tag-yellow'
+            const label   = diff === 0 ? 'D-Day' : `D-${diff}`
             return (
               <div key={i} className="deadline-item">
                 <button
@@ -217,12 +278,12 @@ export default function DayTab({ date }) {
       {/* 조회 메모 */}
       <section className="card">
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
-          <div className="section-label" style={{ margin:0 }}>🌅 {dayLabel} 조회 메모</div>
+          <div className="section-label" style={{ margin:0 }}>🌅 {lbl} 조회 메모</div>
           <span className={`save-toast${toastField === 'morning' ? ' visible' : ''}`}>저장됨 ✓</span>
         </div>
         <textarea
           rows={3}
-          placeholder={`${dayLabel} 조회 시간 메모를 입력하세요...`}
+          placeholder="조회 시간 메모를 입력하세요..."
           value={homeroomDraft.morning}
           onChange={e => setHomeroomDraft(p => ({ ...p, morning: e.target.value }))}
           onBlur={e => saveHomeroomField('morning', e.target.value)}
@@ -232,7 +293,7 @@ export default function DayTab({ date }) {
 
       {/* 수업 */}
       <section className="card">
-        <div className="section-label">📚 {dayLabel} 수업</div>
+        <div className="section-label">📚 {lbl} 수업</div>
         {!dayKey && <div className="empty">수업이 없어요 🎉</div>}
         {dayKey && lessons.length === 0 && <div className="empty">시간표를 설정해주세요</div>}
         {lessons.map((lesson, idx) => (
@@ -250,9 +311,9 @@ export default function DayTab({ date }) {
 
       {/* 일정 */}
       <section className="card">
-        <div className="section-label">📌 {dayLabel} 일정</div>
+        <div className="section-label">📌 {lbl} 일정</div>
         {daySchedules.length === 0
-          ? <div className="empty">{dayLabel} 일정이 없어요</div>
+          ? <div className="empty">일정이 없어요</div>
           : daySchedules.map((s, i) => (
             <div key={i} className="schedule-item">
               <span className="schedule-time">{s.time || '--:--'}</span>
@@ -265,12 +326,12 @@ export default function DayTab({ date }) {
       {/* 종례 메모 */}
       <section className="card">
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
-          <div className="section-label" style={{ margin:0 }}>🌇 {dayLabel} 종례 메모</div>
+          <div className="section-label" style={{ margin:0 }}>🌇 {lbl} 종례 메모</div>
           <span className={`save-toast${toastField === 'afternoon' ? ' visible' : ''}`}>저장됨 ✓</span>
         </div>
         <textarea
           rows={3}
-          placeholder={`${dayLabel} 종례 시간 메모를 입력하세요...`}
+          placeholder="종례 시간 메모를 입력하세요..."
           value={homeroomDraft.afternoon}
           onChange={e => setHomeroomDraft(p => ({ ...p, afternoon: e.target.value }))}
           onBlur={e => saveHomeroomField('afternoon', e.target.value)}
@@ -281,7 +342,7 @@ export default function DayTab({ date }) {
   )
 }
 
-// ── LessonCard ──────────────────────────────────────────────────
+// ── LessonCard ──────────────────────────────────────────────
 function LessonCard({ lesson, isToday, onComplete, onSaveFields }) {
   const [editing,    setEditing]    = useState(false)
   const [draftLast,  setDraftLast]  = useState('')
@@ -299,16 +360,16 @@ function LessonCard({ lesson, isToday, onComplete, onSaveFields }) {
     setEditing(false)
   }
 
-  const isDone      = lesson.todayEntry?.status === 'done'
-  const displayLast = lesson.editedLastClass ?? lesson.lastClass
-  const displayThis = lesson.editedThisClass ?? lesson.thisClass
-  const completeLabel = isToday ? '✅ 수업 완료' : '📌 계획 저장'
+  const isDone         = lesson.todayEntry?.status === 'done'
+  const displayLast    = lesson.editedLastClass ?? lesson.lastClass
+  const displayThis    = lesson.editedThisClass ?? lesson.thisClass
+  const completeLabel  = isToday ? '✅ 수업 완료' : '📌 계획 저장'
 
   return (
     <div className="lesson-card" style={isDone ? { opacity:0.7, borderLeftColor:'var(--mint-300)' } : {}}>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'4px' }}>
         <div className="lesson-period">{lesson.period}교시</div>
-        {isDone && <span className="tag tag-green"  style={{ fontSize:'0.7rem' }}>✅ 완료</span>}
+        {isDone && <span className="tag tag-green" style={{ fontSize:'0.7rem' }}>✅ 완료</span>}
         {lesson.todayEntry?.status === 'plan' && (
           <span className="tag tag-mint" style={{ fontSize:'0.7rem' }}>📌 계획</span>
         )}
@@ -329,12 +390,12 @@ function LessonCard({ lesson, isToday, onComplete, onSaveFields }) {
           </div>
           <div>
             <label style={{ fontSize:'0.72rem', color:'var(--gray-500)', display:'block', marginBottom:'3px' }}>
-              {isToday ? '이번 시간 계획' : '내일 수업 계획'}
+              {isToday ? '이번 시간 계획' : '다음 수업 계획'}
             </label>
             <input
               value={draftThis}
               onChange={e => setDraftThis(e.target.value)}
-              placeholder={isToday ? '이번 시간 계획' : '내일 수업 계획'}
+              placeholder={isToday ? '이번 시간 계획' : '다음 수업 계획'}
               autoFocus
             />
           </div>
@@ -350,7 +411,7 @@ function LessonCard({ lesson, isToday, onComplete, onSaveFields }) {
             <p>{displayLast || <span style={{ color:'var(--gray-300)' }}>기록 없음</span>}</p>
           </div>
           <div className="lesson-field" style={{ marginTop:'8px' }}>
-            <label>{isToday ? '이번 시간 계획' : '내일 수업 계획'}</label>
+            <label>{isToday ? '이번 시간 계획' : '다음 수업 계획'}</label>
             <p>{displayThis || <span style={{ color:'var(--gray-300)' }}>미입력</span>}</p>
           </div>
           <div className="lesson-actions">
