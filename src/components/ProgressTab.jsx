@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import * as XLSX from 'xlsx-js-style'
 import { getBasicTimetable, getProgressLogs, saveProgressLog } from '../firebase'
 import { uniqueClasses, formatDate, getWeekKey, getWeekDates, getToday } from '../utils'
 
@@ -7,6 +8,8 @@ const STATUS_OPTIONS = [
   { value: 'done',    label: '✅ 완료' },
   { value: 'holiday', label: '🔴 휴강' },
 ]
+
+const STATUS_LABEL = { done: '완료', plan: '계획', holiday: '휴강' }
 
 function StatusBadge({ status }) {
   const map = {
@@ -24,7 +27,16 @@ const CELL_COLORS = {
   holiday: { background: '#f0f0f0', color: '#888' },
 }
 
-function OverallView({ classes, onSelectClass }) {
+// xlsx-js-style 셀 스타일 정의
+const XLS_S = {
+  done:    { fill:{ patternType:'solid', fgColor:{ rgb:'D45880' } }, font:{ color:{ rgb:'FFFFFF' }, sz:10 } },
+  plan:    { fill:{ patternType:'solid', fgColor:{ rgb:'FCE4EE' } }, font:{ color:{ rgb:'7A2048' }, sz:10 } },
+  holiday: { fill:{ patternType:'solid', fgColor:{ rgb:'F0F0F0' } }, font:{ color:{ rgb:'888888' }, sz:10 } },
+  header:  { fill:{ patternType:'solid', fgColor:{ rgb:'FDF0F5' } }, font:{ bold:true, color:{ rgb:'5A2038' }, sz:10 } },
+  weekCol: { fill:{ patternType:'solid', fgColor:{ rgb:'FDF0F5' } }, font:{ bold:true, color:{ rgb:'7A2048' }, sz:10 } },
+}
+
+function OverallView({ classes, holidays, onSelectClass }) {
   const [allLogs, setAllLogs] = useState({})
   const [loading, setLoading] = useState(true)
 
@@ -64,6 +76,13 @@ function OverallView({ classes, onSelectClass }) {
     return m
   }, [allLogs, allWeeks])
 
+  const holidayDates = useMemo(() => new Set(holidays.map(h => h.date)), [holidays])
+
+  const weekHasHoliday = (wk) => {
+    const dates = getWeekDates(wk)
+    return Object.values(dates).some(d => holidayDates.has(d))
+  }
+
   const getCellStatus = (logs) => {
     if (!logs || logs.length === 0) return null
     if (logs.some(l => l.status === 'done')) return 'done'
@@ -76,6 +95,34 @@ function OverallView({ classes, onSelectClass }) {
     return logs.map(l => l.content).filter(Boolean).join(' / ')
   }
 
+  // 전체 현황 엑셀 내보내기
+  const exportXlsx = () => {
+    const wb = XLSX.utils.book_new()
+    const headerRow = [
+      { v: '주차', s: XLS_S.header },
+      { v: '날짜', s: XLS_S.header },
+      ...classes.map(c => ({ v: c, s: XLS_S.header }))
+    ]
+    const dataRows = allWeeks.map((wk, idx) => {
+      const dates = getWeekDates(wk)
+      const range = `${formatDate(dates.mon)}~${formatDate(dates.fri)}`
+      return [
+        { v: `${idx + 1}주차`, s: XLS_S.weekCol },
+        { v: range, s: XLS_S.weekCol },
+        ...classes.map(cls => {
+          const cellLogs = matrix[wk]?.[cls]
+          const status = getCellStatus(cellLogs)
+          const content = getCellContent(cellLogs)
+          return { v: content || STATUS_LABEL[status] || '', s: status ? XLS_S[status] : {} }
+        })
+      ]
+    })
+    const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows])
+    ws['!cols'] = [{ wch: 8 }, { wch: 12 }, ...classes.map(() => ({ wch: 16 }))]
+    XLSX.utils.book_append_sheet(wb, ws, '전체현황')
+    XLSX.writeFile(wb, `키키쌤_진도표_${getToday()}.xlsx`)
+  }
+
   if (loading) return <div className="empty">불러오는 중...</div>
   if (!classes.length) return <div className="empty">기본 시간표에서 반을 먼저 등록하세요</div>
   if (!allWeeks.length) return <div className="empty">진도 기록이 없어요</div>
@@ -84,92 +131,111 @@ function OverallView({ classes, onSelectClass }) {
   const CLASS_COL_W = 110
 
   return (
-    <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-      <table style={{ borderCollapse: 'collapse', minWidth: WEEK_COL_W + classes.length * CLASS_COL_W }}>
-        <thead>
-          <tr>
-            <th style={{
-              position: 'sticky', left: 0, zIndex: 2,
-              background: '#fdf0f5',
-              width: WEEK_COL_W, minWidth: WEEK_COL_W,
-              padding: '8px 10px', fontSize: '0.72rem', color: '#b06080',
-              borderBottom: '2px solid #f5c2d5',
-              borderRight: '2px solid #f5c2d5',
-              textAlign: 'center',
-            }}>주차</th>
-            {classes.map(cls => (
-              <th key={cls} style={{
-                padding: '8px 10px', fontSize: '0.78rem',
-                fontWeight: 600, color: '#5a2038',
+    <>
+      <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px'}}>
+        <span style={{fontSize:'0.75rem', color:'var(--gray-400)'}}>셀 클릭 → 반별 보기 이동</span>
+        <button className="btn btn-secondary btn-sm" onClick={exportXlsx}>📥 엑셀</button>
+      </div>
+      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        <table style={{ borderCollapse: 'collapse', minWidth: WEEK_COL_W + classes.length * CLASS_COL_W }}>
+          <thead>
+            <tr>
+              <th style={{
+                position: 'sticky', left: 0, zIndex: 2,
                 background: '#fdf0f5',
+                width: WEEK_COL_W, minWidth: WEEK_COL_W,
+                padding: '8px 10px', fontSize: '0.72rem', color: '#b06080',
                 borderBottom: '2px solid #f5c2d5',
-                borderRight: '1px solid #f5e6ee',
-                width: CLASS_COL_W, minWidth: CLASS_COL_W,
-                maxWidth: CLASS_COL_W,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                borderRight: '2px solid #f5c2d5',
                 textAlign: 'center',
-              }}>{cls}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {allWeeks.map((wk, idx) => {
-            const dates = getWeekDates(wk)
-            const range = `${formatDate(dates.mon)}~${formatDate(dates.fri)}`
-            return (
-              <tr key={wk}>
-                <td style={{
-                  position: 'sticky', left: 0, zIndex: 1,
+              }}>주차</th>
+              {classes.map(cls => (
+                <th key={cls} style={{
+                  padding: '8px 10px', fontSize: '0.78rem',
+                  fontWeight: 600, color: '#5a2038',
                   background: '#fdf0f5',
-                  padding: '8px 10px',
-                  borderBottom: '1px solid #f5e6ee',
-                  borderRight: '2px solid #f5c2d5',
+                  borderBottom: '2px solid #f5c2d5',
+                  borderRight: '1px solid #f5e6ee',
+                  width: CLASS_COL_W, minWidth: CLASS_COL_W,
+                  maxWidth: CLASS_COL_W,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   textAlign: 'center',
-                  whiteSpace: 'nowrap',
-                }}>
-                  <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#7a2048' }}>{idx + 1}주차</div>
-                  <div style={{ fontSize: '0.65rem', color: '#b06080', marginTop: '2px' }}>{range}</div>
-                </td>
-                {classes.map(cls => {
-                  const cellLogs = matrix[wk]?.[cls]
-                  const status = getCellStatus(cellLogs)
-                  const content = getCellContent(cellLogs)
-                  const colorStyle = status ? CELL_COLORS[status] : { background: '#fff', color: '#ccc' }
-                  const cellLabel = content || (status === 'done' ? '완료' : status === 'plan' ? '계획' : status === 'holiday' ? '휴강' : '')
-                  return (
-                    <td
-                      key={cls}
-                      onClick={() => status && onSelectClass(cls)}
-                      title={content || undefined}
-                      style={{
-                        padding: '7px 9px',
-                        borderBottom: '1px solid #f0f0f0',
-                        borderRight: '1px solid #f0f0f0',
-                        cursor: status ? 'pointer' : 'default',
-                        ...colorStyle,
-                      }}
-                    >
-                      <div style={{
-                        fontSize: '0.78rem',
-                        lineHeight: 1.3,
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        maxWidth: CLASS_COL_W - 18,
-                      }}>
-                        {cellLabel}
-                      </div>
-                    </td>
-                  )
-                })}
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
+                }}>{cls}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {allWeeks.map((wk, idx) => {
+              const dates = getWeekDates(wk)
+              const range = `${formatDate(dates.mon)}~${formatDate(dates.fri)}`
+              const hasHoliday = weekHasHoliday(wk)
+              // 주차 내 휴일 이름 (첫 번째)
+              const weekHolName = hasHoliday
+                ? (holidays.find(h => Object.values(dates).includes(h.date))?.name || '')
+                : ''
+              return (
+                <tr key={wk}>
+                  <td style={{
+                    position: 'sticky', left: 0, zIndex: 1,
+                    background: '#fdf0f5',
+                    padding: '8px 10px',
+                    borderBottom: '1px solid #f5e6ee',
+                    borderRight: '2px solid #f5c2d5',
+                    textAlign: 'center',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#7a2048' }}>{idx + 1}주차</div>
+                    <div style={{ fontSize: '0.65rem', color: '#b06080', marginTop: '2px' }}>{range}</div>
+                    {weekHolName && (
+                      <div style={{ fontSize: '0.6rem', color: '#d45880', marginTop: '2px' }}>🏖️ {weekHolName}</div>
+                    )}
+                  </td>
+                  {classes.map(cls => {
+                    const cellLogs = matrix[wk]?.[cls]
+                    const status = getCellStatus(cellLogs)
+                    const content = getCellContent(cellLogs)
+                    // 휴일 주 빈 셀은 연회색
+                    const colorStyle = status
+                      ? CELL_COLORS[status]
+                      : hasHoliday
+                        ? { background: '#f5f5f5', color: '#bbb' }
+                        : { background: '#fff', color: '#ccc' }
+                    const cellLabel = content || STATUS_LABEL[status] || ''
+                    return (
+                      <td
+                        key={cls}
+                        onClick={() => status && onSelectClass(cls)}
+                        title={content || undefined}
+                        style={{
+                          padding: '7px 9px',
+                          borderBottom: '1px solid #f0f0f0',
+                          borderRight: '1px solid #f0f0f0',
+                          cursor: status ? 'pointer' : 'default',
+                          ...colorStyle,
+                        }}
+                      >
+                        <div style={{
+                          fontSize: '0.78rem',
+                          lineHeight: 1.3,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          maxWidth: CLASS_COL_W - 18,
+                        }}>
+                          {cellLabel}
+                        </div>
+                      </td>
+                    )
+                  })}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
   )
 }
 
-export default function ProgressTab() {
+export default function ProgressTab({ holidays = [] }) {
   const [viewMode,   setViewMode]   = useState('class') // 'class' | 'overall'
   const [classes,    setClasses]    = useState([])
   const [selected,   setSelected]   = useState('')
@@ -244,6 +310,27 @@ export default function ProgressTab() {
     setLogs(updated)
   }
 
+  // ── 반별 보기 엑셀 내보내기 ───────────────────────────────
+  const exportClassXlsx = () => {
+    const wb = XLSX.utils.book_new()
+    const wsData = [
+      [{ v:'날짜', s:XLS_S.header }, { v:'내용', s:XLS_S.header }, { v:'상태', s:XLS_S.header }],
+      ...logs.map(l => {
+        const st = l.status || 'plan'
+        return [
+          { v: l.date || '', s: XLS_S[st] || {} },
+          { v: l.content || '', s: XLS_S[st] || {} },
+          { v: STATUS_LABEL[st] || '계획', s: XLS_S[st] || {} },
+        ]
+      })
+    ]
+    const ws = XLSX.utils.aoa_to_sheet(wsData)
+    ws['!cols'] = [{ wch:12 }, { wch:40 }, { wch:8 }]
+    const sheetName = (selected||'진도표').slice(0, 31).replace(/[:\\/\*\?\[\]]/g, '_')
+    XLSX.utils.book_append_sheet(wb, ws, sheetName)
+    XLSX.writeFile(wb, `키키쌤_진도표_${getToday()}.xlsx`)
+  }
+
   const handleSelectClassFromOverall = (cls) => {
     setSelected(cls)
     setViewMode('class')
@@ -268,8 +355,12 @@ export default function ProgressTab() {
       {/* 전체 현황 뷰 */}
       {viewMode === 'overall' && (
         <section className="card" style={{padding:'14px 14px 16px', overflow:'visible'}}>
-          <div className="section-label" style={{marginBottom:'12px'}}>📊 전체 현황</div>
-          <OverallView classes={classes} onSelectClass={handleSelectClassFromOverall} />
+          <div className="section-label" style={{marginBottom:'4px'}}>📊 전체 현황</div>
+          <OverallView
+            classes={classes}
+            holidays={holidays}
+            onSelectClass={handleSelectClassFromOverall}
+          />
         </section>
       )}
 
@@ -338,8 +429,13 @@ export default function ProgressTab() {
             <section className="card">
               <div className="section-label">
                 📋 {selected} 진도 기록
-                <span style={{marginLeft:'auto',fontSize:'0.72rem',color:'var(--gray-400)',fontWeight:400}}>
-                  {logs.length}건
+                <span style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:'8px'}}>
+                  {logs.length > 0 && (
+                    <button className="btn btn-secondary btn-sm" onClick={exportClassXlsx}>📥 엑셀</button>
+                  )}
+                  <span style={{fontSize:'0.72rem',color:'var(--gray-400)',fontWeight:400}}>
+                    {logs.length}건
+                  </span>
                 </span>
               </div>
 
@@ -348,13 +444,12 @@ export default function ProgressTab() {
               {!loading && logs.length === 0 && (
                 <div className="empty">
                   기록이 없어요<br/>
-                  <span style={{fontSize:'0.78rem'}}>관리탭 → 이번 주 시간표 → "진도표에 반영" 해보세요</span>
+                  <span style={{fontSize:'0.78rem'}}>시간표 탭 → 이번 주 → "진도표에 반영" 해보세요</span>
                 </div>
               )}
 
               {!loading && logs.length > 0 && (
                 <>
-                  {/* 헤더 */}
                   <div className="prog-header" style={{gridTemplateColumns:'76px 1fr 88px 60px'}}>
                     <span>날짜</span><span>내용</span><span>상태</span><span></span>
                   </div>

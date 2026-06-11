@@ -90,3 +90,12 @@ export async function getHomeroom(dateKey) {
 export async function saveHomeroom(dateKey, data) {
   await setDoc(doc(db, 'homeroom', `${SYNC_ID}_${dateKey}`), data)
 }
+
+// --- custom holidays ---
+export async function getCustomHolidays() {
+  const snap = await getDoc(doc(db, 'holidays', SYNC_ID))
+  return snap.exists() ? (snap.data().items || []) : []
+}
+export async function saveCustomHolidays(items) {
+  await setDoc(doc(db, 'holidays', SYNC_ID), { items })
+}

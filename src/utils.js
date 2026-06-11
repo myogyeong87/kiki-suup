@@ -104,6 +104,28 @@ export function prevWeekday(dateStr) {
   return toDateStr(dt)
 }
 
+// 다음 평일+임의휴일 스킵
+export function nextWorkday(dateStr, holidays = []) {
+  const hset = new Set(holidays.map(h => h.date))
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  do {
+    dt.setDate(dt.getDate() + 1)
+  } while ([0, 6].includes(dt.getDay()) || hset.has(toDateStr(dt)))
+  return toDateStr(dt)
+}
+
+// 이전 평일+임의휴일 스킵
+export function prevWorkday(dateStr, holidays = []) {
+  const hset = new Set(holidays.map(h => h.date))
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  do {
+    dt.setDate(dt.getDate() - 1)
+  } while ([0, 6].includes(dt.getDay()) || hset.has(toDateStr(dt)))
+  return toDateStr(dt)
+}
+
 export function uniqueClasses(timetable) {
   const set = new Set()
   Object.values(timetable).forEach(dayObj => {
