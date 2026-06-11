@@ -40,12 +40,17 @@ function ScheduleManager() {
   const [editId,       setEditId]       = useState(null)
   const [editForm,     setEditForm]     = useState({ date:'', time:'', content:'' })
   const [editTimeMode, setEditTimeMode] = useState('text')
+  const [showPast,     setShowPast]     = useState(false)
 
   useEffect(() => {
     getSchedules().then(data =>
       setItems([...data].sort((a,b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`)))
     )
   }, [])
+
+  const today = getToday()
+  const upcoming = items.filter(i => i.date >= today)
+  const past     = items.filter(i => i.date < today)
 
   const add = async () => {
     if (!form.content.trim()) return
@@ -78,6 +83,38 @@ function ScheduleManager() {
     setItems(updated)
   }
 
+  const renderItem = (item) =>
+    editId === item.id ? (
+      <div key={item.id} className="inline-edit-card">
+        <input type="date" value={editForm.date} onChange={e=>setEditForm(p=>({...p,date:e.target.value}))} />
+        <TimeInput value={editForm.time} onChange={v=>setEditForm(p=>({...p,time:v}))} mode={editTimeMode} onModeChange={setEditTimeMode} />
+        <input
+          value={editForm.content}
+          onChange={e=>setEditForm(p=>({...p,content:e.target.value}))}
+          onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditId(null) }}
+          placeholder="일정 내용"
+          autoFocus
+        />
+        <div style={{display:'flex',gap:'8px'}}>
+          <button className="btn btn-primary btn-sm" onClick={saveEdit}>저장</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setEditId(null)}>취소</button>
+        </div>
+      </div>
+    ) : (
+      <div key={item.id} className="schedule-item">
+        <div style={{flex:1}}>
+          <div style={{fontSize:'0.78rem',color:'var(--pink-600)',fontWeight:700}}>
+            {formatDate(item.date)}{item.time ? ` ${item.time}` : ''}
+          </div>
+          <div style={{fontSize:'0.9rem'}}>{item.content}</div>
+        </div>
+        <div style={{display:'flex',gap:'4px',alignItems:'center',flexShrink:0}}>
+          <button className="icon-btn icon-btn-edit" onClick={() => startEdit(item)} title="수정">✏️</button>
+          <button className="btn btn-danger btn-icon" onClick={() => remove(item.id)}>✕</button>
+        </div>
+      </div>
+    )
+
   return (
     <section className="card">
       <div className="section-label">📌 일정 관리</div>
@@ -93,55 +130,47 @@ function ScheduleManager() {
         <button className="btn btn-primary" onClick={add} disabled={saving}>+ 추가</button>
       </div>
 
-      {items.length === 0 && <div className="empty">등록된 일정이 없어요</div>}
-      {items.map(item =>
-        editId === item.id ? (
-          <div key={item.id} className="inline-edit-card">
-            <input type="date" value={editForm.date} onChange={e=>setEditForm(p=>({...p,date:e.target.value}))} />
-            <TimeInput value={editForm.time} onChange={v=>setEditForm(p=>({...p,time:v}))} mode={editTimeMode} onModeChange={setEditTimeMode} />
-            <input
-              value={editForm.content}
-              onChange={e=>setEditForm(p=>({...p,content:e.target.value}))}
-              onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditId(null) }}
-              placeholder="일정 내용"
-              autoFocus
-            />
-            <div style={{display:'flex',gap:'8px'}}>
-              <button className="btn btn-primary btn-sm" onClick={saveEdit}>저장</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => setEditId(null)}>취소</button>
-            </div>
-          </div>
-        ) : (
-          <div key={item.id} className="schedule-item">
-            <div style={{flex:1}}>
-              <div style={{fontSize:'0.78rem',color:'var(--pink-600)',fontWeight:700}}>
-                {formatDate(item.date)}{item.time ? ` ${item.time}` : ''}
-              </div>
-              <div style={{fontSize:'0.9rem'}}>{item.content}</div>
-            </div>
-            <div style={{display:'flex',gap:'4px',alignItems:'center',flexShrink:0}}>
-              <button className="icon-btn icon-btn-edit" onClick={() => startEdit(item)} title="수정">✏️</button>
-              <button className="btn btn-danger btn-icon" onClick={() => remove(item.id)}>✕</button>
-            </div>
-          </div>
-        )
+      {upcoming.length === 0 && past.length === 0 && <div className="empty">등록된 일정이 없어요</div>}
+      {upcoming.length === 0 && past.length > 0 && <div className="empty">다가오는 일정이 없어요</div>}
+      {upcoming.map(renderItem)}
+
+      {past.length > 0 && (
+        <>
+          <button
+            onClick={() => setShowPast(p => !p)}
+            style={{
+              width:'100%', marginTop:'8px', padding:'8px',
+              background:'none', border:'1px dashed var(--gray-300)',
+              borderRadius:'8px', color:'var(--gray-400)', fontSize:'0.82rem',
+              cursor:'pointer'
+            }}
+          >
+            {showPast ? `지난 일정 접기 ▲` : `지난 일정 보기 ▼ (${past.length}개)`}
+          </button>
+          {showPast && past.map(renderItem)}
+        </>
       )}
     </section>
   )
 }
 
 function DeadlineManager() {
-  const [items,    setItems]    = useState([])
-  const [form,     setForm]     = useState({ title: '', date: '' })
-  const [saving,   setSaving]   = useState(false)
-  const [editId,   setEditId]   = useState(null)
-  const [editForm, setEditForm] = useState({ title:'', date:'' })
+  const [items,        setItems]        = useState([])
+  const [form,         setForm]         = useState({ title: '', date: '' })
+  const [saving,       setSaving]       = useState(false)
+  const [editId,       setEditId]       = useState(null)
+  const [editForm,     setEditForm]     = useState({ title:'', date:'' })
+  const [showArchived, setShowArchived] = useState(false)
 
   useEffect(() => {
     getDeadlines().then(data =>
       setItems([...data].sort((a,b) => a.date.localeCompare(b.date)))
     )
   }, [])
+
+  const today = getToday()
+  const active   = items.filter(i => !i.done && i.date >= today)
+  const archived = items.filter(i => i.done || i.date < today)
 
   const add = async () => {
     if (!form.title.trim() || !form.date) return
@@ -179,6 +208,38 @@ function DeadlineManager() {
     setItems(updated)
   }
 
+  const renderItem = (item) =>
+    editId === item.id ? (
+      <div key={item.id} className="inline-edit-card">
+        <input
+          value={editForm.title}
+          onChange={e=>setEditForm(p=>({...p,title:e.target.value}))}
+          onKeyDown={e => { if (e.key === 'Enter' && editForm.date) saveEdit(); if (e.key === 'Escape') setEditId(null) }}
+          placeholder="마감 항목 제목"
+          autoFocus
+        />
+        <input type="date" value={editForm.date} onChange={e=>setEditForm(p=>({...p,date:e.target.value}))} />
+        <div style={{display:'flex',gap:'8px'}}>
+          <button className="btn btn-primary btn-sm" onClick={saveEdit}>저장</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setEditId(null)}>취소</button>
+        </div>
+      </div>
+    ) : (
+      <div key={item.id} className="deadline-item">
+        <button className={`check-circle${item.done?' checked':''}`} onClick={() => toggle(item.id)}>
+          {item.done ? '✓' : ''}
+        </button>
+        <div style={{flex:1}}>
+          <span className={item.done?'strikethrough':''}>{item.title}</span>
+          <div style={{fontSize:'0.75rem',color:'var(--gray-400)'}}>{formatDate(item.date)}</div>
+        </div>
+        <div style={{display:'flex',gap:'4px',alignItems:'center',flexShrink:0}}>
+          <button className="icon-btn icon-btn-edit" onClick={() => startEdit(item)} title="수정">✏️</button>
+          <button className="btn btn-danger btn-icon" onClick={() => remove(item.id)}>✕</button>
+        </div>
+      </div>
+    )
+
   return (
     <section className="card">
       <div className="section-label">⏰ 마감 관리</div>
@@ -193,38 +254,25 @@ function DeadlineManager() {
         <button className="btn btn-primary" onClick={add} disabled={saving}>+ 추가</button>
       </div>
 
-      {items.length === 0 && <div className="empty">등록된 마감이 없어요</div>}
-      {items.map(item =>
-        editId === item.id ? (
-          <div key={item.id} className="inline-edit-card">
-            <input
-              value={editForm.title}
-              onChange={e=>setEditForm(p=>({...p,title:e.target.value}))}
-              onKeyDown={e => { if (e.key === 'Enter' && editForm.date) saveEdit(); if (e.key === 'Escape') setEditId(null) }}
-              placeholder="마감 항목 제목"
-              autoFocus
-            />
-            <input type="date" value={editForm.date} onChange={e=>setEditForm(p=>({...p,date:e.target.value}))} />
-            <div style={{display:'flex',gap:'8px'}}>
-              <button className="btn btn-primary btn-sm" onClick={saveEdit}>저장</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => setEditId(null)}>취소</button>
-            </div>
-          </div>
-        ) : (
-          <div key={item.id} className="deadline-item">
-            <button className={`check-circle${item.done?' checked':''}`} onClick={() => toggle(item.id)}>
-              {item.done ? '✓' : ''}
-            </button>
-            <div style={{flex:1}}>
-              <span className={item.done?'strikethrough':''}>{item.title}</span>
-              <div style={{fontSize:'0.75rem',color:'var(--gray-400)'}}>{formatDate(item.date)}</div>
-            </div>
-            <div style={{display:'flex',gap:'4px',alignItems:'center',flexShrink:0}}>
-              <button className="icon-btn icon-btn-edit" onClick={() => startEdit(item)} title="수정">✏️</button>
-              <button className="btn btn-danger btn-icon" onClick={() => remove(item.id)}>✕</button>
-            </div>
-          </div>
-        )
+      {active.length === 0 && archived.length === 0 && <div className="empty">등록된 마감이 없어요</div>}
+      {active.length === 0 && archived.length > 0 && <div className="empty">미완료 마감이 없어요</div>}
+      {active.map(renderItem)}
+
+      {archived.length > 0 && (
+        <>
+          <button
+            onClick={() => setShowArchived(p => !p)}
+            style={{
+              width:'100%', marginTop:'8px', padding:'8px',
+              background:'none', border:'1px dashed var(--gray-300)',
+              borderRadius:'8px', color:'var(--gray-400)', fontSize:'0.82rem',
+              cursor:'pointer'
+            }}
+          >
+            {showArchived ? `지난 마감 접기 ▲` : `지난 마감 보기 ▼ (${archived.length}개)`}
+          </button>
+          {showArchived && archived.map(renderItem)}
+        </>
       )}
     </section>
   )
