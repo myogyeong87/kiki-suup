@@ -9,7 +9,7 @@ import {
 import {
   getToday, getDayKeyFromDate, getWeekKey,
   daysUntilFrom, formatDate, formatDateKorean,
-  nextWeekday, prevWeekday, nextWorkday, prevWorkday,
+  nextWeekday, prevWeekday,
   PERIODS, DAY_LABELS
 } from '../utils'
 
@@ -17,7 +17,6 @@ import {
 // navigable: true → 내일 탭 (날짜 이동 가능), false → 오늘 탭
 export default function DayTab({ initialDate, navigable = false, holidays = [] }) {
   const [date, setDate] = useState(initialDate)
-  const [skipHolidays, setSkipHolidays] = useState(true)
 
   const isToday = date === getToday()
   const weekKey = getWeekKey(date)
@@ -158,15 +157,8 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
 
   const lbl = isToday ? '오늘' : dayName
 
-  // ── 날짜 이동 (휴일 스킵 옵션 적용) ──────────────────────
-  const goPrev = () => {
-    if (skipHolidays && holidays.length > 0) setDate(prevWorkday(date, holidays))
-    else setDate(prevWeekday(date))
-  }
-  const goNext = () => {
-    if (skipHolidays && holidays.length > 0) setDate(nextWorkday(date, holidays))
-    else setDate(nextWeekday(date))
-  }
+  const goPrev = () => setDate(prevWeekday(date))
+  const goNext = () => setDate(nextWeekday(date))
 
   // ── 휴일 확인 ──────────────────────────────────────────────
   const todayHoliday = holidays.find(h => h.date === date)
@@ -201,70 +193,54 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
       {/* 날짜 네비게이터 (내일 탭) */}
       {navigable ? (
         <div style={{
-          display:'flex', flexDirection:'column',
+          display:'flex', alignItems:'center', justifyContent:'space-between',
           background:'var(--white)', borderRadius:'14px', padding:'10px 16px',
           boxShadow:'0 1px 6px rgba(45,136,128,0.07)'
         }}>
-          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
-            <button
-              onClick={goPrev}
-              style={{
-                width:'36px', height:'36px', borderRadius:'10px',
-                background:'var(--mint-100)', color:'var(--mint-700)',
-                fontSize:'1.2rem', fontWeight:700,
-                display:'flex', alignItems:'center', justifyContent:'center'
-              }}
-            >‹</button>
-            <div style={{ textAlign:'center' }}>
-              <div style={{ fontWeight:700, color:'var(--mint-700)', fontSize:'0.92rem' }}>
-                {formatDateKorean(date)}
-              </div>
-              {isToday && (
-                <span style={{
-                  display:'inline-block', marginTop:'3px',
-                  fontSize:'0.68rem', background:'var(--mint-500)', color:'white',
-                  padding:'1px 8px', borderRadius:'20px', fontWeight:700
-                }}>오늘</span>
-              )}
+          <button
+            onClick={goPrev}
+            style={{
+              width:'36px', height:'36px', borderRadius:'10px',
+              background:'var(--mint-100)', color:'var(--mint-700)',
+              fontSize:'1.2rem', fontWeight:700,
+              display:'flex', alignItems:'center', justifyContent:'center'
+            }}
+          >‹</button>
+          <div style={{ textAlign:'center' }}>
+            <div style={{ fontWeight:700, color:'var(--mint-700)', fontSize:'0.92rem' }}>
+              {formatDateKorean(date)}
             </div>
-            <button
-              onClick={goNext}
-              style={{
-                width:'36px', height:'36px', borderRadius:'10px',
-                background:'var(--mint-100)', color:'var(--mint-700)',
-                fontSize:'1.2rem', fontWeight:700,
-                display:'flex', alignItems:'center', justifyContent:'center'
-              }}
-            >›</button>
+            {isToday && (
+              <span style={{
+                display:'inline-block', marginTop:'3px',
+                fontSize:'0.68rem', background:'var(--mint-500)', color:'white',
+                padding:'1px 8px', borderRadius:'20px', fontWeight:700
+              }}>오늘</span>
+            )}
+            {todayHoliday && (
+              <div style={{ marginTop:'4px', fontSize:'0.75rem', color:'#d45880', fontWeight:700 }}>
+                🔴 {todayHoliday.name}
+              </div>
+            )}
           </div>
-          {/* 휴일 스킵 토글 */}
-          <div style={{textAlign:'center', marginTop:'6px'}}>
-            <label style={{fontSize:'0.72rem', color:'var(--gray-400)', cursor:'pointer', userSelect:'none'}}>
-              <input
-                type="checkbox"
-                checked={skipHolidays}
-                onChange={e => setSkipHolidays(e.target.checked)}
-                style={{marginRight:'4px', cursor:'pointer'}}
-              />
-              휴일 건너뛰기
-            </label>
-          </div>
+          <button
+            onClick={goNext}
+            style={{
+              width:'36px', height:'36px', borderRadius:'10px',
+              background:'var(--mint-100)', color:'var(--mint-700)',
+              fontSize:'1.2rem', fontWeight:700,
+              display:'flex', alignItems:'center', justifyContent:'center'
+            }}
+          >›</button>
         </div>
       ) : (
         <div style={{ textAlign:'center', color:'var(--mint-600)', fontWeight:700, fontSize:'0.9rem' }}>
           {formatDateKorean(date)}
-        </div>
-      )}
-
-      {/* 휴일 배너 */}
-      {todayHoliday && (
-        <div style={{
-          background:'var(--pink-100)', color:'var(--pink-700)',
-          padding:'10px 16px', borderRadius:'12px',
-          textAlign:'center', fontWeight:700, fontSize:'0.88rem',
-          border:'1px solid var(--pink-200)'
-        }}>
-          🏖️ {todayHoliday.name}
+          {todayHoliday && (
+            <div style={{ marginTop:'4px', fontSize:'0.75rem', color:'#d45880', fontWeight:700 }}>
+              🔴 {todayHoliday.name}
+            </div>
+          )}
         </div>
       )}
 
