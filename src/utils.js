@@ -16,6 +16,12 @@ export function getTomorrow() {
   return toDateStr(d)
 }
 
+export function getNextWeekKey() {
+  const d = new Date()
+  d.setDate(d.getDate() + 7)
+  return getWeekKey(toDateStr(d))
+}
+
 // 'YYYY-MM-DD' → 'mon'~'fri' | null (로컬 날짜 기준, 주말은 null)
 export function getDayKeyFromDate(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)

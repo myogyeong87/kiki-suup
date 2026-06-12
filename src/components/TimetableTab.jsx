@@ -5,7 +5,7 @@ import {
   getProgressLogs, saveProgressLog,
   getCustomHolidays, saveCustomHolidays,
 } from '../firebase'
-import { DAYS, DAY_LABELS, PERIODS, getWeekKey, getWeekDates, formatDate } from '../utils'
+import { DAYS, DAY_LABELS, PERIODS, getWeekKey, getNextWeekKey, getWeekDates, formatDate } from '../utils'
 
 function TimetableGrid({ grid, onUpdate }) {
   return (
@@ -165,6 +165,52 @@ function WeeklyTimetable() {
   )
 }
 
+function NextWeeklyTimetable() {
+  const nextWeekKey = getNextWeekKey()
+  const thisWeekKey = getWeekKey()
+  const [grid,   setGrid]   = useState({})
+  const [saving, setSaving] = useState(false)
+  const [saved,  setSaved]  = useState(false)
+
+  useEffect(() => { getWeeklyTimetable(nextWeekKey).then(setGrid) }, [nextWeekKey])
+
+  const loadFromBasic = async () => {
+    const basic = await getBasicTimetable()
+    setGrid(basic); setSaved(false)
+  }
+
+  const loadFromThisWeek = async () => {
+    const thisWeek = await getWeeklyTimetable(thisWeekKey)
+    setGrid(thisWeek); setSaved(false)
+  }
+
+  const update = (day, period, val) => {
+    setGrid(prev => ({ ...prev, [day]: { ...(prev[day]||{}), [period]: val } }))
+    setSaved(false)
+  }
+
+  const save = async () => {
+    setSaving(true)
+    await saveWeeklyTimetable(nextWeekKey, grid)
+    setSaving(false); setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  return (
+    <section className="card">
+      <div className="section-label">📅 다음 주 시간표 ({nextWeekKey})</div>
+      <div style={{display:'flex',gap:'8px',marginBottom:'12px',flexWrap:'wrap'}}>
+        <button className="btn btn-secondary btn-sm" onClick={loadFromBasic}>기본 시간표 불러오기</button>
+        <button className="btn btn-secondary btn-sm" onClick={loadFromThisWeek}>이번 주 시간표 불러오기</button>
+      </div>
+      <TimetableGrid grid={grid} onUpdate={update} />
+      <button className="btn btn-primary w-full mt-16" onClick={save} disabled={saving}>
+        {saving ? '저장 중...' : saved ? '✓ 저장됨' : '저장'}
+      </button>
+    </section>
+  )
+}
+
 const THIS_YEAR = new Date().getFullYear()
 
 function HolidayManager({ onHolidaysChange }) {
@@ -273,9 +319,10 @@ function HolidayManager({ onHolidaysChange }) {
 export default function TimetableTab({ onHolidaysChange }) {
   const [section, setSection] = useState('basic')
   const sections = [
-    { id:'basic',   label:'기본 시간표' },
-    { id:'weekly',  label:'이번 주' },
-    { id:'holiday', label:'휴일 관리' },
+    { id:'basic',       label:'기본 시간표' },
+    { id:'weekly',      label:'이번 주' },
+    { id:'nextweekly',  label:'다음 주' },
+    { id:'holiday',     label:'휴일 관리' },
   ]
   return (
     <div className="page" style={{display:'flex',flexDirection:'column',gap:'16px'}}>
@@ -288,9 +335,10 @@ export default function TimetableTab({ onHolidaysChange }) {
           >{s.label}</button>
         ))}
       </div>
-      {section === 'basic'   && <BasicTimetable />}
-      {section === 'weekly'  && <WeeklyTimetable />}
-      {section === 'holiday' && <HolidayManager onHolidaysChange={onHolidaysChange} />}
+      {section === 'basic'       && <BasicTimetable />}
+      {section === 'weekly'      && <WeeklyTimetable />}
+      {section === 'nextweekly'  && <NextWeeklyTimetable />}
+      {section === 'holiday'     && <HolidayManager onHolidaysChange={onHolidaysChange} />}
     </div>
   )
 }
