@@ -168,9 +168,11 @@ function WeeklyTimetable() {
 function NextWeeklyTimetable() {
   const nextWeekKey = getNextWeekKey()
   const thisWeekKey = getWeekKey()
-  const [grid,   setGrid]   = useState({})
-  const [saving, setSaving] = useState(false)
-  const [saved,  setSaved]  = useState(false)
+  const [grid,     setGrid]     = useState({})
+  const [saving,   setSaving]   = useState(false)
+  const [saved,    setSaved]    = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [applyMsg, setApplyMsg] = useState('')
 
   useEffect(() => { getWeeklyTimetable(nextWeekKey).then(setGrid) }, [nextWeekKey])
 
@@ -196,6 +198,49 @@ function NextWeeklyTimetable() {
     setTimeout(() => setSaved(false), 2000)
   }
 
+  const applyToProgress = async () => {
+    setApplying(true); setApplyMsg('')
+    try {
+      const weekDates = getWeekDates(nextWeekKey)
+      const classDateMap = {}
+      for (const day of DAYS) {
+        const date = weekDates[day]
+        if (!date) continue
+        for (const p of PERIODS) {
+          const cn = (grid[day]?.[p] || '').trim()
+          if (!cn) continue
+          if (!classDateMap[cn]) classDateMap[cn] = new Set()
+          classDateMap[cn].add(date)
+        }
+      }
+      if (Object.keys(classDateMap).length === 0) {
+        setApplyMsg('시간표에 반이 없습니다')
+        setApplying(false)
+        setTimeout(() => setApplyMsg(''), 3000)
+        return
+      }
+      let added = 0
+      for (const [cn, dates] of Object.entries(classDateMap)) {
+        const logs = await getProgressLogs(cn)
+        let changed = false
+        for (const date of dates) {
+          if (logs.find(l => l.date === date)) continue
+          logs.push({
+            id: `${date}-${cn}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+            week: nextWeekKey, date, content: '', status: 'plan',
+          })
+          changed = true; added++
+        }
+        if (changed) await saveProgressLog(cn, logs)
+      }
+      setApplyMsg(added > 0 ? `✅ ${added}건 추가됨` : '새로운 항목 없음')
+    } catch(e) {
+      setApplyMsg('오류가 발생했습니다'); console.error(e)
+    }
+    setApplying(false)
+    setTimeout(() => setApplyMsg(''), 3000)
+  }
+
   return (
     <section className="card">
       <div className="section-label">📅 다음 주 시간표 ({nextWeekKey})</div>
@@ -207,6 +252,25 @@ function NextWeeklyTimetable() {
       <button className="btn btn-primary w-full mt-16" onClick={save} disabled={saving}>
         {saving ? '저장 중...' : saved ? '✓ 저장됨' : '저장'}
       </button>
+      <div style={{marginTop:'12px',borderTop:'1px solid var(--gray-100)',paddingTop:'12px'}}>
+        <button
+          className="btn btn-secondary w-full"
+          style={{background:'var(--pink-50)',color:'var(--pink-700)',border:'1.5px dashed var(--pink-300)'}}
+          onClick={applyToProgress}
+          disabled={applying}
+        >
+          {applying ? '처리 중...' : '📋 진도표에 반영'}
+        </button>
+        {applyMsg && (
+          <div style={{
+            marginTop:'8px',fontSize:'0.82rem',textAlign:'center',fontWeight:600,
+            color: applyMsg.startsWith('✅') ? 'var(--pink-600)' : 'var(--gray-500)'
+          }}>{applyMsg}</div>
+        )}
+        <div style={{fontSize:'0.72rem',color:'var(--gray-400)',marginTop:'6px',textAlign:'center'}}>
+          저장된 시간표를 진도표에 📌 계획 항목으로 추가합니다
+        </div>
+      </div>
     </section>
   )
 }
