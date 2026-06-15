@@ -107,12 +107,10 @@ export default function TodayTab() {
   const completeLesson = async (lesson, setCompleting) => {
     setCompleting(true)
     try {
-      // 항상 Firestore 최신 데이터를 가져온 뒤 저장 (stale data 방지)
       const freshLogs = await getProgressLogs(lesson.className)
       const content       = (lesson.editedThisClass ?? lesson.thisClass) || ''
       const lastClassNote = (lesson.editedLastClass  ?? lesson.lastClass) || ''
       const idx = freshLogs.findIndex(l => l.date === today)
-      // undefined가 포함되지 않도록 모든 필드를 명시적으로 지정
       const entry = {
         id:           (idx >= 0 && freshLogs[idx].id) || `${today}-${lesson.className}-${Date.now()}`,
         week:         weekKey || '',
@@ -133,6 +131,43 @@ export default function TodayTab() {
       showToast('error', `저장 실패: ${e.code || e.message || '알 수 없는 오류'}`)
     }
     setCompleting(false)
+  }
+
+  // ── 수업 완료 취소 ─────────────────────────────────────
+  const uncompleteLesson = async (lesson) => {
+    try {
+      const freshLogs = await getProgressLogs(lesson.className)
+      const idx = freshLogs.findIndex(l => l.date === today)
+      if (idx < 0) return
+      const updatedLogs = [...freshLogs]
+      updatedLogs[idx] = { ...freshLogs[idx], status: 'plan' }
+      await saveProgressLog(lesson.className, updatedLogs)
+      showToast('complete', '↩️ 완료 취소됨')
+      await load()
+    } catch(e) {
+      console.error('[uncompleteLesson]', e)
+      showToast('error', `저장 실패: ${e.code || e.message || '알 수 없는 오류'}`)
+    }
+  }
+
+  // ── 완료 상태에서 내용 편집 저장 ───────────────────────
+  const saveEditedLesson = async (lesson, draftLast, draftThis) => {
+    try {
+      const freshLogs = await getProgressLogs(lesson.className)
+      const idx = freshLogs.findIndex(l => l.date === today)
+      if (idx < 0) return
+      const updatedLogs = [...freshLogs]
+      updatedLogs[idx] = {
+        ...freshLogs[idx],
+        content:      draftThis || '',
+        lastClassNote: draftLast || '',
+      }
+      await saveProgressLog(lesson.className, updatedLogs)
+      showToast('complete', '✅ 저장됨')
+    } catch(e) {
+      console.error('[saveEditedLesson]', e)
+      showToast('error', `저장 실패: ${e.code || e.message || '알 수 없는 오류'}`)
+    }
   }
 
   // ── 오늘 일정 ──────────────────────────────────────────
@@ -226,9 +261,11 @@ export default function TodayTab() {
             key={`${lesson.className}-${idx}`}
             lesson={lesson}
             onComplete={(setCompleting) => completeLesson(lesson, setCompleting)}
+            onUncomplete={() => uncompleteLesson(lesson)}
             onSaveFields={(fields) => {
               setTodayLessons(prev => prev.map((l,i) => i===idx ? {...l, ...fields} : l))
             }}
+            onSaveEdits={(draftLast, draftThis) => saveEditedLesson(lesson, draftLast, draftThis)}
           />
         ))}
       </section>
@@ -267,7 +304,7 @@ export default function TodayTab() {
 }
 
 // ── LessonCard ─────────────────────────────────────────────────
-function LessonCard({ lesson, onComplete, onSaveFields }) {
+function LessonCard({ lesson, onComplete, onUncomplete, onSaveFields, onSaveEdits }) {
   const [editing, setEditing] = useState(false)
   const [draftLast, setDraftLast] = useState('')
   const [draftThis, setDraftThis] = useState('')
@@ -279,8 +316,10 @@ function LessonCard({ lesson, onComplete, onSaveFields }) {
     setEditing(true)
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     onSaveFields({ editedLastClass: draftLast, editedThisClass: draftThis })
+    // 완료 상태에서 편집 시 Firestore 즉시 반영
+    if (isDone) await onSaveEdits(draftLast, draftThis)
     setEditing(false)
   }
 
@@ -335,14 +374,21 @@ function LessonCard({ lesson, onComplete, onSaveFields }) {
             <button className="btn btn-secondary btn-sm" onClick={startEdit}>
               ✏️ 편집
             </button>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => onComplete(setCompleting)}
-              disabled={completing}
-              style={completing ? {opacity:0.6} : {}}
-            >
-              {completing ? '저장 중...' : '✅ 수업 완료'}
-            </button>
+            {isDone ? (
+              <button className="btn btn-secondary btn-sm" onClick={onUncomplete}
+                style={{color:'var(--gray-500)'}}>
+                ↩️ 완료 취소
+              </button>
+            ) : (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => onComplete(setCompleting)}
+                disabled={completing}
+                style={completing ? {opacity:0.6} : {}}
+              >
+                {completing ? '저장 중...' : '✅ 수업 완료'}
+              </button>
+            )}
           </div>
         </>
       )}
