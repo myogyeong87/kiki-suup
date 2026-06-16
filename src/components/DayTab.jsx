@@ -167,20 +167,31 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
     }
   }
 
-  // ── 완료 상태에서 내용 편집 저장 ─────────────────────────────
+  // ── 내용 편집 저장 (완료 전/후 모두 즉시 Firestore 반영) ─────
   const saveEditedLesson = async (lesson, draftLast, draftThis) => {
     try {
       const freshLogs = await getProgressLogs(lesson.className)
       const idx = freshLogs.findIndex(l => l.date === date)
-      if (idx < 0) return
       const updated = [...freshLogs]
-      updated[idx] = {
-        ...freshLogs[idx],
-        content:       draftThis || '',
-        lastClassNote: draftLast || '',
+      if (idx >= 0) {
+        updated[idx] = {
+          ...freshLogs[idx],
+          content:       draftThis || '',
+          lastClassNote: draftLast || '',
+        }
+      } else {
+        updated.push({
+          id:            `${date}-${lesson.className}-${Date.now()}`,
+          week:          weekKey,
+          date,
+          content:       draftThis || '',
+          lastClassNote: draftLast || '',
+          status:        'plan',
+        })
       }
       await saveProgressLog(lesson.className, updated)
       showToast('complete', '✅ 저장됨')
+      await load()
     } catch(e) {
       console.error('[saveEditedLesson]', e)
       showToast('error', `저장 실패: ${e.code || e.message || '알 수 없는 오류'}`)
@@ -410,8 +421,8 @@ function LessonCard({ lesson, isToday, onComplete, onUncomplete, onSaveFields, o
 
   const handleSave = async () => {
     onSaveFields({ editedLastClass: draftLast, editedThisClass: draftThis })
-    // 완료 상태에서 편집 시 Firestore 즉시 반영
-    if (isDone) await onSaveEdits(draftLast, draftThis)
+    // 완료 여부와 무관하게 편집 시 Firestore 즉시 반영 (진도표에 바로 표시)
+    await onSaveEdits(draftLast, draftThis)
     setEditing(false)
   }
 
