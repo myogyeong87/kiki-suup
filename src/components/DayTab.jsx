@@ -93,7 +93,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
   }
 
   const allPending = deadlines
-    .filter(d => !d.done && daysUntilFrom(d.date, date) >= 0)
+    .filter(d => !d.done)
     .sort((a, b) => a.date.localeCompare(b.date))
 
   const urgentDeadlines = showAllDeadlines
@@ -148,6 +148,43 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
       showToast('error', `저장 실패: ${e.code || e.message || '알 수 없는 오류'}`)
     }
     setCompleting(false)
+  }
+
+  // ── 수업 완료 취소 ──────────────────────────────────────────
+  const uncompleteLesson = async (lesson) => {
+    try {
+      const freshLogs = await getProgressLogs(lesson.className)
+      const idx = freshLogs.findIndex(l => l.date === date)
+      if (idx < 0) return
+      const updated = [...freshLogs]
+      updated[idx] = { ...freshLogs[idx], status: 'plan' }
+      await saveProgressLog(lesson.className, updated)
+      showToast('complete', '↩️ 완료 취소됨')
+      await load()
+    } catch(e) {
+      console.error('[uncompleteLesson]', e)
+      showToast('error', `저장 실패: ${e.code || e.message || '알 수 없는 오류'}`)
+    }
+  }
+
+  // ── 완료 상태에서 내용 편집 저장 ─────────────────────────────
+  const saveEditedLesson = async (lesson, draftLast, draftThis) => {
+    try {
+      const freshLogs = await getProgressLogs(lesson.className)
+      const idx = freshLogs.findIndex(l => l.date === date)
+      if (idx < 0) return
+      const updated = [...freshLogs]
+      updated[idx] = {
+        ...freshLogs[idx],
+        content:       draftThis || '',
+        lastClassNote: draftLast || '',
+      }
+      await saveProgressLog(lesson.className, updated)
+      showToast('complete', '✅ 저장됨')
+    } catch(e) {
+      console.error('[saveEditedLesson]', e)
+      showToast('error', `저장 실패: ${e.code || e.message || '알 수 없는 오류'}`)
+    }
   }
 
   // ── 일정 ───────────────────────────────────────────────────
@@ -265,8 +302,9 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
           ) : urgentDeadlines.map((d, i) => {
             const realIdx = deadlines.indexOf(d)
             const diff    = daysUntilFrom(d.date, date)
-            const tagCls  = diff <= 3 ? 'tag-red' : 'tag-yellow'
-            const label   = diff === 0 ? 'D-Day' : `D-${diff}`
+            const overdue = diff < 0
+            const tagCls  = overdue ? 'tag-overdue' : (diff <= 3 ? 'tag-red' : 'tag-yellow')
+            const label   = overdue ? `D+${-diff}` : (diff === 0 ? 'D-Day' : `D-${diff}`)
             return (
               <div key={i} className="deadline-item">
                 <button
@@ -276,7 +314,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
                   {d.done ? '✓' : ''}
                 </button>
                 <div style={{ flex:1 }}>
-                  <span className={d.done ? 'strikethrough' : ''}>{d.title}</span>
+                  <span className={d.done ? 'strikethrough' : (overdue ? 'overdue-text' : '')}>{d.title}</span>
                   <div style={{ fontSize:'0.75rem', color:'var(--gray-400)', marginTop:'2px' }}>
                     {formatDate(d.date)}
                   </div>
@@ -315,9 +353,11 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
             lesson={lesson}
             isToday={isToday}
             onComplete={(setCompleting) => completeLesson(lesson, setCompleting)}
+            onUncomplete={() => uncompleteLesson(lesson)}
             onSaveFields={(fields) => {
               setLessons(prev => prev.map((l, i) => i === idx ? { ...l, ...fields } : l))
             }}
+            onSaveEdits={(draftLast, draftThis) => saveEditedLesson(lesson, draftLast, draftThis)}
           />
         ))}
       </section>
@@ -356,7 +396,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
 }
 
 // ── LessonCard ──────────────────────────────────────────────
-function LessonCard({ lesson, isToday, onComplete, onSaveFields }) {
+function LessonCard({ lesson, isToday, onComplete, onUncomplete, onSaveFields, onSaveEdits }) {
   const [editing,    setEditing]    = useState(false)
   const [draftLast,  setDraftLast]  = useState('')
   const [draftThis,  setDraftThis]  = useState('')
@@ -368,8 +408,10 @@ function LessonCard({ lesson, isToday, onComplete, onSaveFields }) {
     setEditing(true)
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     onSaveFields({ editedLastClass: draftLast, editedThisClass: draftThis })
+    // 완료 상태에서 편집 시 Firestore 즉시 반영
+    if (isDone) await onSaveEdits(draftLast, draftThis)
     setEditing(false)
   }
 
@@ -377,6 +419,7 @@ function LessonCard({ lesson, isToday, onComplete, onSaveFields }) {
   const displayLast    = lesson.editedLastClass ?? lesson.lastClass
   const displayThis    = lesson.editedThisClass ?? lesson.thisClass
   const completeLabel  = isToday ? '✅ 수업 완료' : '📌 계획 저장'
+  const uncompleteLabel = isToday ? '↩️ 완료 취소' : '↩️ 계획 취소'
 
   return (
     <div className="lesson-card" style={isDone ? { opacity:0.7, borderLeftColor:'var(--mint-300)' } : {}}>
@@ -429,14 +472,21 @@ function LessonCard({ lesson, isToday, onComplete, onSaveFields }) {
           </div>
           <div className="lesson-actions">
             <button className="btn btn-secondary btn-sm" onClick={startEdit}>✏️ 편집</button>
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => onComplete(setCompleting)}
-              disabled={completing}
-              style={completing ? { opacity:0.6 } : {}}
-            >
-              {completing ? '저장 중...' : completeLabel}
-            </button>
+            {isDone ? (
+              <button className="btn btn-secondary btn-sm" onClick={onUncomplete}
+                style={{ color:'var(--gray-500)' }}>
+                {uncompleteLabel}
+              </button>
+            ) : (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => onComplete(setCompleting)}
+                disabled={completing}
+                style={completing ? { opacity:0.6 } : {}}
+              >
+                {completing ? '저장 중...' : completeLabel}
+              </button>
+            )}
           </div>
         </>
       )}

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getSchedules, saveSchedules, getDeadlines, saveDeadlines } from '../firebase'
-import { getToday, formatDate } from '../utils'
+import { getToday, formatDate, daysUntil } from '../utils'
 
 const PERIOD_OPTIONS = ['1교시','2교시','3교시','4교시','5교시','6교시','7교시','방과후']
 
@@ -168,9 +168,8 @@ function DeadlineManager() {
     )
   }, [])
 
-  const today = getToday()
-  const active   = items.filter(i => !i.done && i.date >= today)
-  const archived = items.filter(i => i.done || i.date < today)
+  const active   = items.filter(i => !i.done)
+  const archived = items.filter(i => i.done)
 
   const add = async () => {
     if (!form.title.trim() || !form.date) return
@@ -208,8 +207,8 @@ function DeadlineManager() {
     setItems(updated)
   }
 
-  const renderItem = (item) =>
-    editId === item.id ? (
+  const renderItem = (item) => {
+    if (editId === item.id) return (
       <div key={item.id} className="inline-edit-card">
         <input
           value={editForm.title}
@@ -224,21 +223,30 @@ function DeadlineManager() {
           <button className="btn btn-secondary btn-sm" onClick={() => setEditId(null)}>취소</button>
         </div>
       </div>
-    ) : (
+    )
+
+    const diff    = daysUntil(item.date)
+    const overdue = !item.done && diff < 0
+    const tagCls  = overdue ? 'tag-overdue' : (diff <= 3 ? 'tag-red' : 'tag-yellow')
+    const label   = overdue ? `D+${-diff}` : (diff === 0 ? 'D-Day' : `D-${diff}`)
+
+    return (
       <div key={item.id} className="deadline-item">
         <button className={`check-circle${item.done?' checked':''}`} onClick={() => toggle(item.id)}>
           {item.done ? '✓' : ''}
         </button>
         <div style={{flex:1}}>
-          <span className={item.done?'strikethrough':''}>{item.title}</span>
+          <span className={item.done ? 'strikethrough' : (overdue ? 'overdue-text' : '')}>{item.title}</span>
           <div style={{fontSize:'0.75rem',color:'var(--gray-400)'}}>{formatDate(item.date)}</div>
         </div>
+        {!item.done && <span className={`tag ${tagCls}`} style={{flexShrink:0}}>{label}</span>}
         <div style={{display:'flex',gap:'4px',alignItems:'center',flexShrink:0}}>
           <button className="icon-btn icon-btn-edit" onClick={() => startEdit(item)} title="수정">✏️</button>
           <button className="btn btn-danger btn-icon" onClick={() => remove(item.id)}>✕</button>
         </div>
       </div>
     )
+  }
 
   return (
     <section className="card">

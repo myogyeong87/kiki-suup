@@ -135,11 +135,12 @@ input:focus, textarea:focus, select:focus { border-color: var(--pink-400); }
   font-size: 0.75rem;
   font-weight: 700;
 }
-.tag-red    { background: #fce4ee; color: #d45880; }
-.tag-yellow { background: #fef0e0; color: #b85010; }
-.tag-green  { background: #dcfce7; color: #166534; }
-.tag-purple { background: var(--pink-100); color: var(--pink-700); }
-.tag-mint   { background: var(--pink-100); color: var(--pink-700); }
+.tag-red     { background: #fce4ee; color: #d45880; }
+.tag-yellow  { background: #fef0e0; color: #b85010; }
+.tag-green   { background: #dcfce7; color: #166534; }
+.tag-purple  { background: var(--pink-100); color: var(--pink-700); }
+.tag-mint    { background: var(--pink-100); color: var(--pink-700); }
+.tag-overdue { background: #dc2626; color: #fff; }
 
 .page {
   flex: 1;
@@ -371,3 +372,4 @@ input:focus, textarea:focus, select:focus { border-color: var(--pink-400); }
 .text-gray   { color: var(--gray-500); }
 .text-red    { color: #d45880; }
 .strikethrough { text-decoration: line-through; opacity: 0.5; }
+.overdue-text { color: #b91c1c; font-weight: 700; }
