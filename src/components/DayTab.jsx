@@ -119,7 +119,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
 
   const urgentDeadlines = showAllDeadlines
     ? allPending
-    : allPending.filter(d => daysUntilFrom(d.date, date) <= 7)
+    : allPending.slice(0, 3)
 
   // ── 토스트 ────────────────────────────────────────────────
   const showToast = (field, msg = '') => {
@@ -374,7 +374,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
                 borderRadius:'20px', fontWeight:600
               }}
             >
-              {showAllDeadlines ? '접기' : `전체 보기 (${allPending.length})`}
+              {showAllDeadlines ? '접기 ▲' : `전체 보기 (${allPending.length}개) ▼`}
             </button>
           </div>
           {urgentDeadlines.length === 0 ? (
