@@ -141,3 +141,40 @@ export function uniqueClasses(timetable) {
   })
   return [...set].sort()
 }
+
+// 해당 날짜가 방학 기간에 속하는지 확인
+export function getVacationForDate(dateStr, vacations = []) {
+  return vacations.find(v => v.startDate <= dateStr && dateStr <= v.endDate) || null
+}
+
+// 방학·공휴일 모두 스킵하는 다음 평일
+export function nextWorkdaySkipVacation(dateStr, holidays = [], vacations = []) {
+  const hset = new Set(holidays.map(h => h.date))
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  for (let i = 0; i < 500; i++) {
+    dt.setDate(dt.getDate() + 1)
+    const cur = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`
+    if ([0, 6].includes(dt.getDay())) continue
+    if (hset.has(cur)) continue
+    if (getVacationForDate(cur, vacations)) continue
+    return cur
+  }
+  return toDateStr(dt)
+}
+
+// 방학·공휴일 모두 스킵하는 이전 평일
+export function prevWorkdaySkipVacation(dateStr, holidays = [], vacations = []) {
+  const hset = new Set(holidays.map(h => h.date))
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  for (let i = 0; i < 500; i++) {
+    dt.setDate(dt.getDate() - 1)
+    const cur = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`
+    if ([0, 6].includes(dt.getDay())) continue
+    if (hset.has(cur)) continue
+    if (getVacationForDate(cur, vacations)) continue
+    return cur
+  }
+  return toDateStr(dt)
+}

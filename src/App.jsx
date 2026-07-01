@@ -3,7 +3,7 @@ import DayTab from './components/DayTab'
 import ProgressTab from './components/ProgressTab'
 import ScheduleTab from './components/ScheduleTab'
 import TimetableTab from './components/TimetableTab'
-import { getCustomHolidays } from './firebase'
+import { getCustomHolidays, getVacations } from './firebase'
 import { getToday, getTomorrow } from './utils'
 
 const TABS = [
@@ -15,8 +15,10 @@ const TABS = [
 ]
 
 export default function App() {
-  const [tab,      setTab]      = useState('today')
-  const [holidays, setHolidays] = useState([])
+  const [tab,           setTab]           = useState('today')
+  const [holidays,      setHolidays]      = useState([])
+  const [vacations,     setVacations]     = useState([])
+  const [progressClass, setProgressClass] = useState('')
 
   const loadHolidays = useCallback(async () => {
     const year = new Date().getFullYear()
@@ -37,6 +39,10 @@ export default function App() {
     let customHols = []
     try { customHols = await getCustomHolidays() } catch {}
 
+    let vacs = []
+    try { vacs = await getVacations() } catch {}
+    setVacations(vacs)
+
     const map = new Map()
     pubHols.forEach(h => map.set(h.date, h))
     customHols.forEach(h => map.set(h.date, { ...h, isPublic: false }))
@@ -44,6 +50,11 @@ export default function App() {
   }, [])
 
   useEffect(() => { loadHolidays() }, [loadHolidays])
+
+  const navigateToProgress = (className) => {
+    setProgressClass(className)
+    setTab('progress')
+  }
 
   return (
     <>
@@ -53,9 +64,9 @@ export default function App() {
       </header>
 
       <main style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
-        {tab === 'today'     && <DayTab initialDate={getToday()} holidays={holidays} />}
-        {tab === 'tomorrow'  && <DayTab initialDate={getTomorrow()} navigable={true} holidays={holidays} />}
-        {tab === 'progress'  && <ProgressTab holidays={holidays} />}
+        {tab === 'today'     && <DayTab initialDate={getToday()} holidays={holidays} vacations={vacations} onNavigateToProgress={navigateToProgress} />}
+        {tab === 'tomorrow'  && <DayTab initialDate={getTomorrow()} navigable={true} holidays={holidays} vacations={vacations} onNavigateToProgress={navigateToProgress} />}
+        {tab === 'progress'  && <ProgressTab holidays={holidays} vacations={vacations} initialClass={progressClass} onClassSelected={() => setProgressClass('')} />}
         {tab === 'schedule'  && <ScheduleTab />}
         {tab === 'timetable' && <TimetableTab onHolidaysChange={loadHolidays} />}
       </main>

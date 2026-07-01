@@ -27,7 +27,6 @@ const CELL_COLORS = {
   holiday: { background: '#f0f0f0', color: '#888' },
 }
 
-// xlsx-js-style 셀 스타일 정의
 const XLS_S = {
   done:    { fill:{ patternType:'solid', fgColor:{ rgb:'D45880' } }, font:{ color:{ rgb:'FFFFFF' }, sz:10 } },
   plan:    { fill:{ patternType:'solid', fgColor:{ rgb:'FCE4EE' } }, font:{ color:{ rgb:'7A2048' }, sz:10 } },
@@ -36,7 +35,18 @@ const XLS_S = {
   weekCol: { fill:{ patternType:'solid', fgColor:{ rgb:'FDF0F5' } }, font:{ bold:true, color:{ rgb:'7A2048' }, sz:10 } },
 }
 
-function OverallView({ classes, holidays, onSelectClass }) {
+// 해당 주가 방학 기간과 겹치는지 확인
+function getVacationForWeek(wk, vacations) {
+  if (!vacations || !vacations.length) return null
+  const dates = getWeekDates(wk)
+  const weekDateList = Object.values(dates)
+  for (const v of vacations) {
+    if (weekDateList.some(d => d >= v.startDate && d <= v.endDate)) return v
+  }
+  return null
+}
+
+function OverallView({ classes, holidays, vacations, onSelectClass }) {
   const [allLogs, setAllLogs] = useState({})
   const [loading, setLoading] = useState(true)
 
@@ -61,7 +71,6 @@ function OverallView({ classes, holidays, onSelectClass }) {
     return [...weekSet].sort()
   }, [allLogs])
 
-  // matrix[weekKey][className] = logs[]
   const matrix = useMemo(() => {
     const m = {}
     allWeeks.forEach(wk => { m[wk] = {} })
@@ -95,7 +104,6 @@ function OverallView({ classes, holidays, onSelectClass }) {
     return logs.map(l => l.content).filter(Boolean).join(' / ')
   }
 
-  // 전체 현황 엑셀 내보내기
   const exportXlsx = () => {
     const wb = XLSX.utils.book_new()
     const headerRow = [
@@ -169,15 +177,17 @@ function OverallView({ classes, holidays, onSelectClass }) {
               const dates = getWeekDates(wk)
               const range = `${formatDate(dates.mon)}~${formatDate(dates.fri)}`
               const hasHoliday = weekHasHoliday(wk)
-              // 주차 내 휴일 이름 (첫 번째)
               const weekHolName = hasHoliday
                 ? (holidays.find(h => Object.values(dates).includes(h.date))?.name || '')
                 : ''
+              const weekVac = getVacationForWeek(wk, vacations)
+              const isVacWeek = !!weekVac
+
               return (
-                <tr key={wk}>
+                <tr key={wk} style={isVacWeek ? { background:'#fffbe6' } : {}}>
                   <td style={{
                     position: 'sticky', left: 0, zIndex: 1,
-                    background: '#fdf0f5',
+                    background: isVacWeek ? '#fffbe6' : '#fdf0f5',
                     padding: '8px 10px',
                     borderBottom: '1px solid #f5e6ee',
                     borderRight: '2px solid #f5c2d5',
@@ -189,17 +199,21 @@ function OverallView({ classes, holidays, onSelectClass }) {
                     {weekHolName && (
                       <div style={{ fontSize: '0.6rem', color: '#d45880', marginTop: '2px' }}>🏖️ {weekHolName}</div>
                     )}
+                    {isVacWeek && (
+                      <div style={{ fontSize: '0.6rem', color: '#b8860b', marginTop: '2px' }}>🟡 {weekVac.name}</div>
+                    )}
                   </td>
                   {classes.map(cls => {
                     const cellLogs = matrix[wk]?.[cls]
                     const status = getCellStatus(cellLogs)
                     const content = getCellContent(cellLogs)
-                    // 휴일 주 빈 셀은 연회색
                     const colorStyle = status
                       ? CELL_COLORS[status]
-                      : hasHoliday
-                        ? { background: '#f5f5f5', color: '#bbb' }
-                        : { background: '#fff', color: '#ccc' }
+                      : isVacWeek
+                        ? { background: '#fef9e7', color: '#ccc' }
+                        : hasHoliday
+                          ? { background: '#f5f5f5', color: '#bbb' }
+                          : { background: '#fff', color: '#ccc' }
                     const cellLabel = content || STATUS_LABEL[status] || ''
                     return (
                       <td
@@ -235,8 +249,8 @@ function OverallView({ classes, holidays, onSelectClass }) {
   )
 }
 
-export default function ProgressTab({ holidays = [] }) {
-  const [viewMode,   setViewMode]   = useState('class') // 'class' | 'overall'
+export default function ProgressTab({ holidays = [], vacations = [], initialClass = '', onClassSelected }) {
+  const [viewMode,   setViewMode]   = useState('class')
   const [classes,    setClasses]    = useState([])
   const [selected,   setSelected]   = useState('')
   const [logs,       setLogs]       = useState([])
@@ -251,9 +265,25 @@ export default function ProgressTab({ holidays = [] }) {
     getBasicTimetable().then(tt => {
       const list = uniqueClasses(tt)
       setClasses(list)
-      if (list.length) setSelected(list[0])
+      if (initialClass && list.includes(initialClass)) {
+        setSelected(initialClass)
+        setViewMode('class')
+        onClassSelected?.()
+      } else if (list.length) {
+        setSelected(list[0])
+      }
     })
   }, [])
+
+  // initialClass가 나중에 변경될 때 (탭 전환)
+  useEffect(() => {
+    if (!initialClass) return
+    if (classes.length && classes.includes(initialClass)) {
+      setSelected(initialClass)
+      setViewMode('class')
+      onClassSelected?.()
+    }
+  }, [initialClass, classes])
 
   const loadLogs = (cls) => {
     if (!cls) return
@@ -268,7 +298,6 @@ export default function ProgressTab({ holidays = [] }) {
 
   useEffect(() => { loadLogs(selected) }, [selected])
 
-  // ── 추가 ──────────────────────────────────────────────────
   const handleAdd = async () => {
     if (!addForm.date) return
     const entry = {
@@ -285,7 +314,6 @@ export default function ProgressTab({ holidays = [] }) {
     setShowAdd(false)
   }
 
-  // ── 편집 ──────────────────────────────────────────────────
   const startEdit = (idx) => {
     const l = logs[idx]
     setEditDraft({ date: l.date || '', content: l.content || '', status: l.status || 'plan' })
@@ -301,7 +329,6 @@ export default function ProgressTab({ holidays = [] }) {
     setEditingIdx(null)
   }
 
-  // ── 삭제 ──────────────────────────────────────────────────
   const deleteLog = async (e, idx) => {
     e.stopPropagation()
     if (!window.confirm('이 기록을 삭제할까요?')) return
@@ -310,7 +337,6 @@ export default function ProgressTab({ holidays = [] }) {
     setLogs(updated)
   }
 
-  // ── 반별 보기 엑셀 내보내기 ───────────────────────────────
   const exportClassXlsx = () => {
     const wb = XLSX.utils.book_new()
     const wsData = [
@@ -338,7 +364,6 @@ export default function ProgressTab({ holidays = [] }) {
 
   return (
     <div className="page" style={{display:'flex',flexDirection:'column',gap:'16px'}}>
-      {/* 보기 모드 토글 */}
       <section className="card" style={{padding:'10px 14px'}}>
         <div style={{display:'flex',gap:'6px'}}>
           <button
@@ -352,22 +377,20 @@ export default function ProgressTab({ holidays = [] }) {
         </div>
       </section>
 
-      {/* 전체 현황 뷰 */}
       {viewMode === 'overall' && (
         <section className="card" style={{padding:'14px 14px 16px', overflow:'visible'}}>
           <div className="section-label" style={{marginBottom:'4px'}}>📊 전체 현황</div>
           <OverallView
             classes={classes}
             holidays={holidays}
+            vacations={vacations}
             onSelectClass={handleSelectClassFromOverall}
           />
         </section>
       )}
 
-      {/* 반별 보기 */}
       {viewMode === 'class' && (
         <>
-          {/* 반 선택 */}
           <section className="card">
             <div style={{display:'flex',alignItems:'flex-end',gap:'10px'}}>
               <div style={{flex:1}}>
@@ -424,7 +447,6 @@ export default function ProgressTab({ holidays = [] }) {
             )}
           </section>
 
-          {/* 진도 기록 */}
           {selected && (
             <section className="card">
               <div className="section-label">

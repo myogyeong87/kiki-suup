@@ -99,3 +99,21 @@ export async function getCustomHolidays() {
 export async function saveCustomHolidays(items) {
   await setDoc(doc(db, 'holidays', SYNC_ID), { items })
 }
+
+// --- consultations ---
+export async function getConsultations() {
+  const snap = await getDoc(doc(db, 'consultations', SYNC_ID))
+  return snap.exists() ? (snap.data().items || []) : []
+}
+export async function saveConsultations(items) {
+  await setDoc(doc(db, 'consultations', SYNC_ID), { items })
+}
+
+// --- vacations (방학 기간) ---
+export async function getVacations() {
+  const snap = await getDoc(doc(db, 'vacations', SYNC_ID))
+  return snap.exists() ? (snap.data().items || []) : []
+}
+export async function saveVacations(items) {
+  await setDoc(doc(db, 'vacations', SYNC_ID), { items })
+}

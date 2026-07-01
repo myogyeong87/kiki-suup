@@ -4,18 +4,34 @@ import {
   getHomeroom, saveHomeroom,
   getBasicTimetable, getWeeklyTimetable,
   getProgressLogs, saveProgressLog,
-  getSchedules
+  getSchedules, saveSchedules,
+  getConsultations, saveConsultations,
 } from '../firebase'
 import {
   getToday, getDayKeyFromDate, getWeekKey,
   daysUntilFrom, formatDate, formatDateKorean,
-  nextWeekday, prevWeekday,
+  nextWorkdaySkipVacation, prevWorkdaySkipVacation,
+  getVacationForDate,
   PERIODS, DAY_LABELS
 } from '../utils'
 
-// initialDate: 'YYYY-MM-DD'
-// navigable: true → 내일 탭 (날짜 이동 가능), false → 오늘 탭
-export default function DayTab({ initialDate, navigable = false, holidays = [] }) {
+const PERIOD_OPTIONS = ['1교시','2교시','3교시','4교시','5교시','6교시','7교시','방과후']
+
+// 상담 시간 → 정렬 키 (교시 사이에 끼우기)
+const CONSULT_SORT_MAP = {
+  '1교시': 1.5, '2교시': 2.5, '3교시': 3.5, '4교시': 4.5,
+  '5교시': 5.5, '6교시': 6.5, '7교시': 7.5, '방과후': 8.5,
+}
+function getConsultSortKey(time) {
+  if (!time) return 9
+  const t = time.split('~')[0]
+  if (CONSULT_SORT_MAP[t] !== undefined) return CONSULT_SORT_MAP[t]
+  const m = t.match(/^(\d{1,2}):(\d{2})$/)
+  if (m) return parseInt(m[1]) + parseInt(m[2]) / 60
+  return 9
+}
+
+export default function DayTab({ initialDate, navigable = false, holidays = [], vacations = [], onNavigateToProgress }) {
   const [date, setDate] = useState(initialDate)
 
   const isToday = date === getToday()
@@ -23,33 +39,38 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
   const dayKey  = getDayKeyFromDate(date)
   const dayName = dayKey ? DAY_LABELS[dayKey] : '주말'
 
-  const [deadlines,        setDeadlines]       = useState([])
-  const [homeroom,         setHomeroom]         = useState({ morning: '', afternoon: '' })
-  const [homeroomDraft,    setHomeroomDraft]    = useState({ morning: '', afternoon: '' })
-  const [lessons,          setLessons]          = useState([])
-  const [schedules,        setSchedules]        = useState([])
-  const [loading,          setLoading]          = useState(true)
-  const [toastField,       setToastField]       = useState(null)
-  const [toastMsg,         setToastMsg]         = useState('')
-  const [showAllDeadlines, setShowAllDeadlines] = useState(false)
+  const [deadlines,        setDeadlines]        = useState([])
+  const [homeroom,         setHomeroom]          = useState({ morning: '', afternoon: '' })
+  const [homeroomDraft,    setHomeroomDraft]     = useState({ morning: '', afternoon: '' })
+  const [lessons,          setLessons]           = useState([])
+  const [schedules,        setSchedules]         = useState([])
+  const [consultations,    setConsultations]     = useState([])
+  const [loading,          setLoading]           = useState(true)
+  const [toastField,       setToastField]        = useState(null)
+  const [toastMsg,         setToastMsg]          = useState('')
+  const [showAllDeadlines, setShowAllDeadlines]  = useState(false)
+  const [showQuickAdd,     setShowQuickAdd]      = useState(false)
+  const [quickType,        setQuickType]         = useState('schedule')
+  const [quickForm,        setQuickForm]         = useState({ time: '', content: '', studentName: '', memo: '' })
 
-  // 오늘/내일 탭 기준 날짜 바뀌면 리셋
   useEffect(() => { setDate(initialDate) }, [initialDate])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [dl, hr, basic, weekly, sch] = await Promise.all([
+      const [dl, hr, basic, weekly, sch, consults] = await Promise.all([
         getDeadlines(),
         getHomeroom(date),
         getBasicTimetable(),
         getWeeklyTimetable(weekKey),
-        getSchedules()
+        getSchedules(),
+        getConsultations(),
       ])
       setDeadlines(dl)
       setHomeroom(hr)
       setHomeroomDraft(hr)
       setSchedules(sch)
+      setConsultations(consults)
 
       if (!dayKey) { setLessons([]); setLoading(false); return }
 
@@ -83,9 +104,9 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
   }, [date, weekKey, dayKey])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { setShowAllDeadlines(false) }, [date])
+  useEffect(() => { setShowAllDeadlines(false); setShowQuickAdd(false) }, [date])
 
-  // ── 마감 임박 ──────────────────────────────────────────────
+  // ── 마감 임박 ─────────────────────────────────────────────
   const toggleDeadline = async (realIdx) => {
     const updated = deadlines.map((d, i) => i === realIdx ? { ...d, done: !d.done } : d)
     setDeadlines(updated)
@@ -100,14 +121,14 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
     ? allPending
     : allPending.filter(d => daysUntilFrom(d.date, date) <= 7)
 
-  // ── 토스트 ─────────────────────────────────────────────────
+  // ── 토스트 ────────────────────────────────────────────────
   const showToast = (field, msg = '') => {
     setToastField(field)
     setToastMsg(msg)
     setTimeout(() => { setToastField(null); setToastMsg('') }, 2500)
   }
 
-  // ── 조회/종례 저장 ──────────────────────────────────────────
+  // ── 조회/종례 저장 ────────────────────────────────────────
   const saveHomeroomField = async (field, value) => {
     const updated = { ...homeroom, [field]: value }
     setHomeroom(updated)
@@ -120,7 +141,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
     }
   }
 
-  // ── 수업 완료/계획 저장 ────────────────────────────────────
+  // ── 수업 완료/계획 저장 ───────────────────────────────────
   const completeLesson = async (lesson, setCompleting) => {
     setCompleting(true)
     try {
@@ -150,7 +171,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
     setCompleting(false)
   }
 
-  // ── 수업 완료 취소 ──────────────────────────────────────────
+  // ── 수업 완료 취소 ────────────────────────────────────────
   const uncompleteLesson = async (lesson) => {
     try {
       const freshLogs = await getProgressLogs(lesson.className)
@@ -167,7 +188,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
     }
   }
 
-  // ── 내용 편집 저장 (완료 전/후 모두 즉시 Firestore 반영) ─────
+  // ── 내용 편집 저장 ────────────────────────────────────────
   const saveEditedLesson = async (lesson, draftLast, draftThis) => {
     try {
       const freshLogs = await getProgressLogs(lesson.className)
@@ -198,18 +219,48 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
     }
   }
 
-  // ── 일정 ───────────────────────────────────────────────────
+  // ── 빠른 추가 ─────────────────────────────────────────────
+  const handleQuickAdd = async () => {
+    if (quickType === 'schedule') {
+      if (!quickForm.content.trim()) return
+      const newItem = { id: Date.now().toString(), date, time: quickForm.time, content: quickForm.content }
+      const updated = [...schedules, newItem]
+        .sort((a,b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`))
+      await saveSchedules(updated)
+      setSchedules(updated)
+    } else {
+      if (!quickForm.studentName.trim()) return
+      const newItem = { id: Date.now().toString(), date, time: quickForm.time, studentName: quickForm.studentName.trim(), memo: quickForm.memo }
+      const allConsults = await getConsultations()
+      const updated = [...allConsults, newItem]
+        .sort((a,b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`))
+      await saveConsultations(updated)
+      setConsultations(updated)
+    }
+    setShowQuickAdd(false)
+    setQuickForm({ time: '', content: '', studentName: '', memo: '' })
+  }
+
+  // ── 일정/상담 필터링 ──────────────────────────────────────
   const daySchedules = schedules
     .filter(s => s.date === date)
     .sort((a, b) => (a.time || '').localeCompare(b.time || ''))
 
+  const dayConsultations = consultations.filter(c => c.date === date)
+
+  // 수업 + 상담 합쳐서 정렬
+  const combinedItems = [
+    ...lessons.map(l => ({ type: 'lesson', sortKey: l.period, data: l })),
+    ...dayConsultations.map(c => ({ type: 'consult', sortKey: getConsultSortKey(c.time), data: c })),
+  ].sort((a, b) => a.sortKey - b.sortKey)
+
   const lbl = isToday ? '오늘' : dayName
 
-  const goPrev = () => setDate(prevWeekday(date))
-  const goNext = () => setDate(nextWeekday(date))
+  const goPrev = () => setDate(prevWorkdaySkipVacation(date, holidays, vacations))
+  const goNext = () => setDate(nextWorkdaySkipVacation(date, holidays, vacations))
 
-  // ── 휴일 확인 ──────────────────────────────────────────────
-  const todayHoliday = holidays.find(h => h.date === date)
+  const todayHoliday  = holidays.find(h => h.date === date)
+  const todayVacation = getVacationForDate(date, vacations)
 
   if (loading) return (
     <div className="page" style={{ display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -236,6 +287,19 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
           padding:'10px 16px', textAlign:'center',
           fontSize:'0.88rem', fontWeight:700
         }}>{toastMsg}</div>
+      )}
+
+      {/* 방학 배너 */}
+      {todayVacation && (
+        <div style={{
+          background:'#fffbe6', border:'1.5px solid #ffe066',
+          borderRadius:'12px', padding:'10px 16px',
+          display:'flex', alignItems:'center', gap:'8px',
+          fontWeight:700, color:'#856404', fontSize:'0.9rem'
+        }}>
+          🟡 {todayVacation.name}
+          <span style={{fontWeight:400, fontSize:'0.78rem', color:'#b8860b'}}>방학 중</span>
+        </div>
       )}
 
       {/* 날짜 네비게이터 (내일 탭) */}
@@ -268,6 +332,11 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
             {todayHoliday && (
               <div style={{ marginTop:'4px', fontSize:'0.75rem', color:'#d45880', fontWeight:700 }}>
                 🔴 {todayHoliday.name}
+              </div>
+            )}
+            {todayVacation && !todayHoliday && (
+              <div style={{ marginTop:'4px', fontSize:'0.75rem', color:'#b8860b', fontWeight:700 }}>
+                🟡 {todayVacation.name}
               </div>
             )}
           </div>
@@ -353,35 +422,134 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
         />
       </section>
 
-      {/* 수업 */}
+      {/* 수업 + 상담 */}
       <section className="card">
         <div className="section-label">📚 {lbl} 수업</div>
         {!dayKey && <div className="empty">수업이 없어요 🎉</div>}
-        {dayKey && lessons.length === 0 && <div className="empty">시간표를 설정해주세요</div>}
-        {lessons.map((lesson, idx) => (
-          <LessonCard
-            key={`${lesson.className}-${idx}`}
-            lesson={lesson}
-            isToday={isToday}
-            onComplete={(setCompleting) => completeLesson(lesson, setCompleting)}
-            onUncomplete={() => uncompleteLesson(lesson)}
-            onSaveFields={(fields) => {
-              setLessons(prev => prev.map((l, i) => i === idx ? { ...l, ...fields } : l))
-            }}
-            onSaveEdits={(draftLast, draftThis) => saveEditedLesson(lesson, draftLast, draftThis)}
-          />
-        ))}
+        {dayKey && combinedItems.length === 0 && <div className="empty">시간표를 설정해주세요</div>}
+        {combinedItems.map((item, idx) => {
+          if (item.type === 'lesson') {
+            const lesson = item.data
+            return (
+              <LessonCard
+                key={`lesson-${lesson.period}-${idx}`}
+                lesson={lesson}
+                isToday={isToday}
+                onComplete={(setCompleting) => completeLesson(lesson, setCompleting)}
+                onUncomplete={() => uncompleteLesson(lesson)}
+                onSaveFields={(fields) => {
+                  setLessons(prev => prev.map((l) => l.period === lesson.period ? { ...l, ...fields } : l))
+                }}
+                onSaveEdits={(draftLast, draftThis) => saveEditedLesson(lesson, draftLast, draftThis)}
+                onNavigateToProgress={onNavigateToProgress}
+              />
+            )
+          } else {
+            const c = item.data
+            return (
+              <div key={`consult-${idx}`} style={{
+                background:'#fffbea', border:'1.5px solid #ffe08a',
+                borderRadius:'10px', padding:'10px 14px', marginBottom:'8px',
+              }}>
+                <div style={{display:'flex',alignItems:'center',gap:'6px',marginBottom:'3px'}}>
+                  <span style={{fontSize:'0.78rem',fontWeight:700,color:'#b8860b'}}>🗣️ 상담</span>
+                  {c.time && <span style={{fontSize:'0.75rem',color:'#b8860b'}}>{c.time}</span>}
+                </div>
+                <div style={{fontSize:'0.9rem',fontWeight:600,color:'#333'}}>{c.studentName}</div>
+                {c.memo && <div style={{fontSize:'0.8rem',color:'#666',marginTop:'2px'}}>{c.memo}</div>}
+              </div>
+            )
+          }
+        })}
       </section>
 
       {/* 일정 */}
       <section className="card">
-        <div className="section-label">📌 {lbl} 일정</div>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'10px'}}>
+          <div className="section-label" style={{margin:0}}>📌 {lbl} 일정</div>
+          <button
+            onClick={() => setShowQuickAdd(p => !p)}
+            style={{
+              width:'28px',height:'28px',borderRadius:'50%',
+              background:'var(--pink-500)',color:'#fff',
+              fontSize:'1.1rem',fontWeight:700,
+              display:'flex',alignItems:'center',justifyContent:'center',
+              flexShrink:0
+            }}
+          >+</button>
+        </div>
+
+        {/* 빠른 추가 패널 */}
+        {showQuickAdd && (
+          <div style={{
+            background:'var(--pink-50)',border:'1px solid var(--pink-200)',
+            borderRadius:'10px',padding:'12px',marginBottom:'12px',
+            display:'flex',flexDirection:'column',gap:'8px'
+          }}>
+            <div style={{display:'flex',gap:'6px'}}>
+              <button
+                className={`btn btn-sm ${quickType==='schedule'?'btn-primary':'btn-secondary'}`}
+                onClick={() => setQuickType('schedule')}
+              >📌 일정</button>
+              <button
+                className={`btn btn-sm ${quickType==='consult'?'btn-primary':'btn-secondary'}`}
+                onClick={() => setQuickType('consult')}
+              >🗣️ 상담</button>
+            </div>
+
+            <select
+              value={quickForm.time}
+              onChange={e => setQuickForm(p => ({...p, time: e.target.value}))}
+            >
+              <option value="">교시/시간 선택 (선택)</option>
+              {PERIOD_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+
+            {quickType === 'schedule' ? (
+              <input
+                value={quickForm.content}
+                onChange={e => setQuickForm(p => ({...p, content: e.target.value}))}
+                onKeyDown={e => { if (e.key === 'Enter') handleQuickAdd() }}
+                placeholder="일정 내용"
+                autoFocus
+              />
+            ) : (
+              <>
+                <input
+                  value={quickForm.studentName}
+                  onChange={e => setQuickForm(p => ({...p, studentName: e.target.value}))}
+                  placeholder="학생명"
+                  autoFocus
+                />
+                <input
+                  value={quickForm.memo}
+                  onChange={e => setQuickForm(p => ({...p, memo: e.target.value}))}
+                  onKeyDown={e => { if (e.key === 'Enter') handleQuickAdd() }}
+                  placeholder="메모 (선택)"
+                />
+              </>
+            )}
+
+            <div style={{display:'flex',gap:'8px'}}>
+              <button className="btn btn-primary btn-sm" onClick={handleQuickAdd}>추가</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setShowQuickAdd(false); setQuickForm({ time:'', content:'', studentName:'', memo:'' }) }}>취소</button>
+            </div>
+          </div>
+        )}
+
         {daySchedules.length === 0
           ? <div className="empty">일정이 없어요</div>
           : daySchedules.map((s, i) => (
             <div key={i} className="schedule-item">
               <span className="schedule-time">{s.time || '--:--'}</span>
-              <span style={{ fontSize:'0.9rem' }}>{s.content}</span>
+              <div style={{flex:1}}>
+                <span style={{ fontSize:'0.9rem' }}>{s.content}</span>
+                {s.linkedDeadline && (
+                  <div style={{fontSize:'0.72rem',color:'var(--gray-500)',marginTop:'2px'}}>
+                    📎 {s.linkedDeadline.title}
+                  </div>
+                )}
+              </div>
             </div>
           ))
         }
@@ -406,8 +574,8 @@ export default function DayTab({ initialDate, navigable = false, holidays = [] }
   )
 }
 
-// ── LessonCard ──────────────────────────────────────────────
-function LessonCard({ lesson, isToday, onComplete, onUncomplete, onSaveFields, onSaveEdits }) {
+// ── LessonCard ───────────────────────────────────────────────
+function LessonCard({ lesson, isToday, onComplete, onUncomplete, onSaveFields, onSaveEdits, onNavigateToProgress }) {
   const [editing,    setEditing]    = useState(false)
   const [draftLast,  setDraftLast]  = useState('')
   const [draftThis,  setDraftThis]  = useState('')
@@ -421,7 +589,6 @@ function LessonCard({ lesson, isToday, onComplete, onUncomplete, onSaveFields, o
 
   const handleSave = async () => {
     onSaveFields({ editedLastClass: draftLast, editedThisClass: draftThis })
-    // 완료 여부와 무관하게 편집 시 Firestore 즉시 반영 (진도표에 바로 표시)
     await onSaveEdits(draftLast, draftThis)
     setEditing(false)
   }
@@ -441,7 +608,19 @@ function LessonCard({ lesson, isToday, onComplete, onUncomplete, onSaveFields, o
           <span className="tag tag-mint" style={{ fontSize:'0.7rem' }}>📌 계획</span>
         )}
       </div>
-      <div className="lesson-class">{lesson.className}</div>
+      <div
+        className="lesson-class"
+        style={{
+          cursor: onNavigateToProgress ? 'pointer' : 'default',
+          textDecoration: onNavigateToProgress ? 'underline' : 'none',
+          textDecorationStyle: 'dotted',
+          textUnderlineOffset: '3px',
+        }}
+        onClick={() => onNavigateToProgress?.(lesson.className)}
+        title={onNavigateToProgress ? '진도표로 이동' : undefined}
+      >
+        {lesson.className}
+      </div>
 
       {editing ? (
         <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
