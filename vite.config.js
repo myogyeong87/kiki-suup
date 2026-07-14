@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'icons/*.png'],
+      includeAssets: ['favicon.png', 'icons/*.png'],
       manifest: {
         name: '키키쌤의 마법빗자루',
         short_name: '마법빗자루',
@@ -19,9 +19,9 @@ export default defineConfig({
         scope: '/',
         start_url: '/',
         icons: [
-          { src: '/icons/icon-192-v3.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icons/icon-512-v3.png', sizes: '512x512', type: 'image/png' },
-          { src: '/icons/icon-512-v3.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+          { src: '/icons/icon-192-v4.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icons/icon-512-v4.png', sizes: '512x512', type: 'image/png' },
+          { src: '/icons/icon-512-v4.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
         ]
       },
       workbox: {

@@ -59,7 +59,7 @@ export default function App() {
   return (
     <>
       <header className="app-header">
-        <h1>🧹 키키쌤의 마법빗자루</h1>
+        <h1><img src="/icons/icon-192-v4.png" alt="" className="header-icon" /> 키키쌤의 마법빗자루</h1>
         <p className="subtitle">오늘도 마법같은 하루!</p>
       </header>
 
