@@ -4,7 +4,7 @@ import ProgressTab from './components/ProgressTab'
 import ScheduleTab from './components/ScheduleTab'
 import TimetableTab from './components/TimetableTab'
 import { getCustomHolidays, getVacations } from './firebase'
-import { getToday, getTomorrow } from './utils'
+import { getToday, getTomorrowWorkday } from './utils'
 
 const TABS = [
   { id: 'today',     label: '오늘',   icon: '📅' },
@@ -65,7 +65,7 @@ export default function App() {
 
       <main style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}>
         {tab === 'today'     && <DayTab initialDate={getToday()} holidays={holidays} vacations={vacations} onNavigateToProgress={navigateToProgress} />}
-        {tab === 'tomorrow'  && <DayTab initialDate={getTomorrow()} navigable={true} holidays={holidays} vacations={vacations} onNavigateToProgress={navigateToProgress} />}
+        {tab === 'tomorrow'  && <DayTab initialDate={getTomorrowWorkday()} navigable={true} holidays={holidays} vacations={vacations} onNavigateToProgress={navigateToProgress} />}
         {tab === 'progress'  && <ProgressTab holidays={holidays} vacations={vacations} initialClass={progressClass} onClassSelected={() => setProgressClass('')} />}
         {tab === 'schedule'  && <ScheduleTab />}
         {tab === 'timetable' && <TimetableTab onHolidaysChange={loadHolidays} />}

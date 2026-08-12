@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import * as XLSX from 'xlsx-js-style'
-import { getBasicTimetable, getProgressLogs, saveProgressLog } from '../firebase'
-import { uniqueClasses, formatDate, getWeekKey, getWeekDates, getToday } from '../utils'
+import { getSemesters, getProgressLogs, saveProgressLog } from '../firebase'
+import { uniqueClasses, formatDate, getWeekKey, getWeekDates, getToday, getActiveSemester } from '../utils'
 
 const STATUS_OPTIONS = [
   { value: 'plan',    label: '📌 계획' },
@@ -46,7 +46,7 @@ function getVacationForWeek(wk, vacations) {
   return null
 }
 
-function OverallView({ classes, holidays, vacations, onSelectClass }) {
+function OverallView({ classes, semesterId, holidays, vacations, onSelectClass }) {
   const [allLogs, setAllLogs] = useState({})
   const [loading, setLoading] = useState(true)
 
@@ -54,14 +54,14 @@ function OverallView({ classes, holidays, vacations, onSelectClass }) {
     if (!classes.length) { setLoading(false); return }
     setLoading(true)
     Promise.all(classes.map(cls =>
-      getProgressLogs(cls).then(logs => [cls, logs])
+      getProgressLogs(cls, semesterId).then(logs => [cls, logs])
     )).then(results => {
       const map = {}
       results.forEach(([cls, logs]) => { map[cls] = logs })
       setAllLogs(map)
       setLoading(false)
     })
-  }, [classes])
+  }, [classes, semesterId])
 
   const allWeeks = useMemo(() => {
     const weekSet = new Set()
@@ -251,7 +251,8 @@ function OverallView({ classes, holidays, vacations, onSelectClass }) {
 
 export default function ProgressTab({ holidays = [], vacations = [], initialClass = '', onClassSelected }) {
   const [viewMode,   setViewMode]   = useState('class')
-  const [classes,    setClasses]    = useState([])
+  const [semesters,  setSemesters]  = useState([])
+  const [semesterId, setSemesterId] = useState('')
   const [selected,   setSelected]   = useState('')
   const [logs,       setLogs]       = useState([])
   const [loading,    setLoading]    = useState(false)
@@ -262,18 +263,32 @@ export default function ProgressTab({ holidays = [], vacations = [], initialClas
   const editContentRef = useRef(null)
 
   useEffect(() => {
-    getBasicTimetable().then(tt => {
-      const list = uniqueClasses(tt)
-      setClasses(list)
-      if (initialClass && list.includes(initialClass)) {
-        setSelected(initialClass)
-        setViewMode('class')
-        onClassSelected?.()
-      } else if (list.length) {
-        setSelected(list[0])
-      }
+    getSemesters().then(list => {
+      setSemesters(list)
+      const active = getActiveSemester(list, getToday())
+      setSemesterId(active?.id || list[0]?.id || '')
     })
   }, [])
+
+  const selectedSemester = semesters.find(s => s.id === semesterId) || null
+  const classes = useMemo(
+    () => selectedSemester ? uniqueClasses(selectedSemester.timetable || {}) : [],
+    [selectedSemester]
+  )
+
+  // 학기가 바뀌면 반 선택 갱신
+  useEffect(() => {
+    if (!semesterId) { setSelected(''); return }
+    if (initialClass && classes.includes(initialClass)) {
+      setSelected(initialClass)
+      setViewMode('class')
+      onClassSelected?.()
+    } else if (classes.length && !classes.includes(selected)) {
+      setSelected(classes[0])
+    } else if (!classes.length) {
+      setSelected('')
+    }
+  }, [semesterId, classes])
 
   // initialClass가 나중에 변경될 때 (탭 전환)
   useEffect(() => {
@@ -286,17 +301,17 @@ export default function ProgressTab({ holidays = [], vacations = [], initialClas
   }, [initialClass, classes])
 
   const loadLogs = (cls) => {
-    if (!cls) return
+    if (!cls || !semesterId) { setLogs([]); return }
     setLoading(true)
     setEditingIdx(null)
     setShowAdd(false)
-    getProgressLogs(cls).then(data => {
+    getProgressLogs(cls, semesterId).then(data => {
       setLogs([...data].sort((a,b) => (a.date||'').localeCompare(b.date||'')))
       setLoading(false)
     })
   }
 
-  useEffect(() => { loadLogs(selected) }, [selected])
+  useEffect(() => { loadLogs(selected) }, [selected, semesterId])
 
   const handleAdd = async () => {
     if (!addForm.date) return
@@ -308,7 +323,7 @@ export default function ProgressTab({ holidays = [], vacations = [], initialClas
       status:  addForm.status,
     }
     const updated = [...logs, entry].sort((a,b) => (a.date||'').localeCompare(b.date||''))
-    await saveProgressLog(selected, updated)
+    await saveProgressLog(selected, updated, semesterId)
     setLogs(updated)
     setAddForm({ date: getToday(), content: '', status: 'plan' })
     setShowAdd(false)
@@ -324,7 +339,7 @@ export default function ProgressTab({ holidays = [], vacations = [], initialClas
   const saveEdit = async (idx) => {
     const updated = logs.map((l,i) => i === idx ? { ...l, ...editDraft } : l)
       .sort((a,b) => (a.date||'').localeCompare(b.date||''))
-    await saveProgressLog(selected, updated)
+    await saveProgressLog(selected, updated, semesterId)
     setLogs(updated)
     setEditingIdx(null)
   }
@@ -333,7 +348,7 @@ export default function ProgressTab({ holidays = [], vacations = [], initialClas
     e.stopPropagation()
     if (!window.confirm('이 기록을 삭제할까요?')) return
     const updated = logs.filter((_,i) => i !== idx)
-    await saveProgressLog(selected, updated)
+    await saveProgressLog(selected, updated, semesterId)
     setLogs(updated)
   }
 
@@ -365,6 +380,18 @@ export default function ProgressTab({ holidays = [], vacations = [], initialClas
   return (
     <div className="page" style={{display:'flex',flexDirection:'column',gap:'16px'}}>
       <section className="card" style={{padding:'10px 14px'}}>
+        <div className="section-label" style={{marginBottom:'6px'}}>🗓️ 학기 선택</div>
+        {semesters.length === 0
+          ? <div className="empty">시간표 탭에서 학기를 먼저 등록하세요</div>
+          : (
+            <select value={semesterId} onChange={e => setSemesterId(e.target.value)}>
+              {semesters.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )
+        }
+      </section>
+
+      <section className="card" style={{padding:'10px 14px'}}>
         <div style={{display:'flex',gap:'6px'}}>
           <button
             className={viewMode === 'class' ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
@@ -382,6 +409,7 @@ export default function ProgressTab({ holidays = [], vacations = [], initialClas
           <div className="section-label" style={{marginBottom:'4px'}}>📊 전체 현황</div>
           <OverallView
             classes={classes}
+            semesterId={semesterId}
             holidays={holidays}
             vacations={vacations}
             onSelectClass={handleSelectClassFromOverall}
@@ -396,7 +424,7 @@ export default function ProgressTab({ holidays = [], vacations = [], initialClas
               <div style={{flex:1}}>
                 <div className="section-label">📊 반 선택</div>
                 {classes.length === 0
-                  ? <div className="empty">기본 시간표에서 반을 먼저 등록하세요</div>
+                  ? <div className="empty">선택한 학기에 등록된 반이 없어요</div>
                   : (
                     <select value={selected} onChange={e => setSelected(e.target.value)}>
                       {classes.map(c => <option key={c} value={c}>{c}</option>)}

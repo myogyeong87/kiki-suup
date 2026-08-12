@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import {
-  getBasicTimetable, saveBasicTimetable,
+  getBasicTimetable,
+  getSemesters, saveSemesters, getActiveSemesterId,
   getWeeklyTimetable, saveWeeklyTimetable,
   getProgressLogs, saveProgressLog,
   getCustomHolidays, saveCustomHolidays,
   getVacations, saveVacations,
 } from '../firebase'
-import { DAYS, DAY_LABELS, PERIODS, getWeekKey, getNextWeekKey, getWeekDates, formatDate, uniqueClasses } from '../utils'
+import { DAYS, DAY_LABELS, PERIODS, getWeekKey, getNextWeekKey, getWeekDates, formatDate, uniqueClasses, getToday, getActiveSemester } from '../utils'
 
 function TimetableGrid({ grid, onUpdate }) {
   return (
@@ -33,32 +34,110 @@ function TimetableGrid({ grid, onUpdate }) {
   )
 }
 
-function BasicTimetable() {
-  const [grid,   setGrid]   = useState({})
-  const [saving, setSaving] = useState(false)
-  const [saved,  setSaved]  = useState(false)
+function SemesterManager() {
+  const [semesters,  setSemesters]  = useState([])
+  const [editingId,  setEditingId]  = useState(null)
+  const [form,       setForm]       = useState({ name:'', startDate:'' })
+  const [saving,     setSaving]     = useState(false)
+  const [saved,      setSaved]      = useState(false)
 
-  useEffect(() => { getBasicTimetable().then(setGrid) }, [])
+  useEffect(() => { getSemesters().then(setSemesters) }, [])
 
-  const update = (day, period, val) => {
-    setGrid(prev => ({ ...prev, [day]: { ...(prev[day]||{}), [period]: val } }))
+  const activeId = getActiveSemester(semesters, getToday())?.id
+
+  const addSemester = async () => {
+    if (!form.name.trim() || !form.startDate) return
+    const newItem = { id: `sem-${Date.now()}`, name: form.name.trim(), startDate: form.startDate, timetable: {} }
+    const updated = [...semesters, newItem]
+    setSaving(true)
+    await saveSemesters(updated)
+    setSemesters(updated)
+    setForm({ name:'', startDate:'' })
+    setSaving(false)
+    setEditingId(newItem.id)
+  }
+
+  const removeSemester = async (id) => {
+    if (!window.confirm('이 학기 시간표를 삭제할까요? 저장된 시간표 데이터가 사라집니다.')) return
+    const updated = semesters.filter(s => s.id !== id)
+    await saveSemesters(updated)
+    setSemesters(updated)
+    if (editingId === id) setEditingId(null)
+  }
+
+  const updateGrid = (day, period, val) => {
+    setSemesters(prev => prev.map(s => s.id === editingId
+      ? { ...s, timetable: { ...s.timetable, [day]: { ...(s.timetable[day]||{}), [period]: val } } }
+      : s))
     setSaved(false)
   }
 
-  const save = async () => {
+  const saveGrid = async () => {
     setSaving(true)
-    await saveBasicTimetable(grid)
+    await saveSemesters(semesters)
     setSaving(false); setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
 
+  const editingSemester = semesters.find(s => s.id === editingId)
+
   return (
     <section className="card">
-      <div className="section-label">📆 기본 시간표 편집</div>
-      <TimetableGrid grid={grid} onUpdate={update} />
-      <button className="btn btn-primary w-full mt-16" onClick={save} disabled={saving}>
-        {saving ? '저장 중...' : saved ? '✓ 저장됨' : '저장'}
-      </button>
+      <div className="section-label">📆 학기 관리</div>
+
+      {semesters.length > 0 && (
+        <div style={{ marginBottom:'14px', display:'flex', flexDirection:'column', gap:'6px' }}>
+          {semesters.map(s => (
+            <div key={s.id} style={{
+              display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px',
+              background: s.id === editingId ? 'var(--pink-50)' : '#f9f9f9',
+              border: s.id === editingId ? '1.5px solid var(--pink-300)' : '1px solid var(--gray-100)',
+              borderRadius:'8px',
+            }}>
+              <div style={{ flex:1 }}>
+                <span style={{ fontSize:'0.88rem', fontWeight:600 }}>{s.name}</span>
+                {s.id === activeId && (
+                  <span className="tag tag-green" style={{ fontSize:'0.65rem', marginLeft:'6px' }}>현재 적용중</span>
+                )}
+                <div style={{ fontSize:'0.72rem', color:'var(--gray-400)', marginTop:'2px' }}>
+                  {formatDate(s.startDate)}부터
+                </div>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => setEditingId(editingId === s.id ? null : s.id)}>
+                {editingId === s.id ? '접기' : '편집'}
+              </button>
+              <button
+                className="btn btn-danger btn-icon"
+                onClick={() => removeSemester(s.id)}
+                style={{ width:'28px', height:'28px', minHeight:'unset', flexShrink:0 }}
+              >✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ background:'var(--pink-50)', borderRadius:'10px', padding:'12px', border:'1px solid var(--pink-200)', marginBottom: editingSemester ? '16px' : 0 }}>
+        <div style={{ fontSize:'0.75rem', fontWeight:700, color:'var(--pink-700)', marginBottom:'8px' }}>학기 추가</div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'8px' }}>
+          <input
+            value={form.name}
+            onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+            placeholder="예: 2025년 1학기"
+          />
+          <input type="date" value={form.startDate} onChange={e => setForm(p => ({ ...p, startDate: e.target.value }))} />
+        </div>
+        <button className="btn btn-primary btn-sm w-full" onClick={addSemester} disabled={saving}>+ 추가</button>
+      </div>
+
+      {editingSemester && (
+        <>
+          <div className="section-label" style={{ marginTop:'16px' }}>✏️ {editingSemester.name} 시간표</div>
+          <TimetableGrid grid={editingSemester.timetable} onUpdate={updateGrid} />
+          <button className="btn btn-primary w-full mt-16" onClick={saveGrid} disabled={saving}>
+            {saving ? '저장 중...' : saved ? '✓ 저장됨' : '저장'}
+          </button>
+        </>
+      )}
     </section>
   )
 }
@@ -86,12 +165,13 @@ async function applyProgressLogic(weekKey, grid) {
   const allKnownClasses = uniqueClasses(basicTT)
   const currentClasses = new Set(Object.keys(classDateMap))
   const removedClasses = allKnownClasses.filter(cn => !currentClasses.has(cn))
+  const semesterId = await getActiveSemesterId()
 
   let added = 0, cleaned = 0
 
   // 현재 시간표에 있는 반: 없는 날짜 항목만 추가
   for (const [cn, dates] of Object.entries(classDateMap)) {
-    const logs = await getProgressLogs(cn)
+    const logs = await getProgressLogs(cn, semesterId)
     let changed = false
     for (const date of dates) {
       if (logs.find(l => l.date === date)) continue // 이미 있으면 건드리지 않음
@@ -101,12 +181,12 @@ async function applyProgressLogic(weekKey, grid) {
       })
       changed = true; added++
     }
-    if (changed) await saveProgressLog(cn, logs)
+    if (changed) await saveProgressLog(cn, logs, semesterId)
   }
 
   // 시간표에서 빠진 반: 해당 주 날짜의 빈 plan 항목만 삭제 (내용 있거나 done/holiday는 유지)
   for (const cn of removedClasses) {
-    const logs = await getProgressLogs(cn)
+    const logs = await getProgressLogs(cn, semesterId)
     const toKeep = logs.filter(l => {
       if (!weekDateSet.has(l.date)) return true
       if ((l.content || '').trim()) return true
@@ -114,7 +194,7 @@ async function applyProgressLogic(weekKey, grid) {
       return false
     })
     if (toKeep.length !== logs.length) {
-      await saveProgressLog(cn, toKeep)
+      await saveProgressLog(cn, toKeep, semesterId)
       cleaned += logs.length - toKeep.length
     }
   }
@@ -500,9 +580,9 @@ function HolidayManager({ onHolidaysChange }) {
 }
 
 export default function TimetableTab({ onHolidaysChange }) {
-  const [section, setSection] = useState('basic')
+  const [section, setSection] = useState('semester')
   const sections = [
-    { id:'basic',       label:'기본 시간표' },
+    { id:'semester',    label:'학기 관리' },
     { id:'weekly',      label:'이번 주' },
     { id:'nextweekly',  label:'다음 주' },
     { id:'holiday',     label:'휴일 관리' },
@@ -518,7 +598,7 @@ export default function TimetableTab({ onHolidaysChange }) {
           >{s.label}</button>
         ))}
       </div>
-      {section === 'basic'       && <BasicTimetable />}
+      {section === 'semester'    && <SemesterManager />}
       {section === 'weekly'      && <WeeklyTimetable />}
       {section === 'nextweekly'  && <NextWeeklyTimetable />}
       {section === 'holiday'     && <HolidayManager onHolidaysChange={onHolidaysChange} />}

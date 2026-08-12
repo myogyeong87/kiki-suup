@@ -10,16 +10,25 @@ export function getToday() {
   return toDateStr(new Date())
 }
 
-export function getTomorrow() {
-  const d = new Date()
-  d.setDate(d.getDate() + 1)
-  return toDateStr(d)
-}
-
 export function getNextWeekKey() {
   const d = new Date()
   d.setDate(d.getDate() + 7)
   return getWeekKey(toDateStr(d))
+}
+
+// 내일 날짜에서 토/일이면 다음 월요일까지 진행 (주말만 스킵, 휴일/방학은 고려 안 함)
+export function getTomorrowWorkday() {
+  const d = new Date()
+  d.setDate(d.getDate() + 1)
+  while ([0, 6].includes(d.getDay())) d.setDate(d.getDate() + 1)
+  return toDateStr(d)
+}
+
+// semesters: [{id, name, startDate, timetable}] 중 dateStr 기준 적용되는 학기 (startDate <= dateStr 중 가장 최근)
+export function getActiveSemester(semesters, dateStr) {
+  const eligible = (semesters || []).filter(s => s.startDate && s.startDate <= dateStr)
+  if (!eligible.length) return null
+  return eligible.sort((a, b) => b.startDate.localeCompare(a.startDate))[0]
 }
 
 // 'YYYY-MM-DD' → 'mon'~'fri' | null (로컬 날짜 기준, 주말은 null)

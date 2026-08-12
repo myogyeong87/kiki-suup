@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  getDeadlines, saveDeadlines,
+  getTodos, saveTodos,
   getHomeroom, saveHomeroom,
-  getBasicTimetable, getWeeklyTimetable,
+  getBasicTimetable, getWeeklyTimetable, getActiveSemesterId,
   getProgressLogs, saveProgressLog,
   getSchedules, saveSchedules,
   getConsultations, saveConsultations,
@@ -39,7 +39,8 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
   const dayKey  = getDayKeyFromDate(date)
   const dayName = dayKey ? DAY_LABELS[dayKey] : '주말'
 
-  const [deadlines,        setDeadlines]        = useState([])
+  const [todos,            setTodos]             = useState([])
+  const [semesterId,       setSemesterId]        = useState('default')
   const [homeroom,         setHomeroom]          = useState({ morning: '', afternoon: '' })
   const [homeroomDraft,    setHomeroomDraft]     = useState({ morning: '', afternoon: '' })
   const [lessons,          setLessons]           = useState([])
@@ -48,7 +49,11 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
   const [loading,          setLoading]           = useState(true)
   const [toastField,       setToastField]        = useState(null)
   const [toastMsg,         setToastMsg]          = useState('')
-  const [showAllDeadlines, setShowAllDeadlines]  = useState(false)
+  const [showDoneTodos,    setShowDoneTodos]     = useState(false)
+  const [showAddTodo,      setShowAddTodo]       = useState(false)
+  const [todoForm,         setTodoForm]          = useState({ content: '', dueDate: '' })
+  const [editingTodoId,    setEditingTodoId]     = useState(null)
+  const [editTodoForm,     setEditTodoForm]      = useState({ content: '', dueDate: '' })
   const [showQuickAdd,     setShowQuickAdd]      = useState(false)
   const [quickType,        setQuickType]         = useState('schedule')
   const [quickForm,        setQuickForm]         = useState({ time: '', content: '', studentName: '', memo: '' })
@@ -58,19 +63,21 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [dl, hr, basic, weekly, sch, consults] = await Promise.all([
-        getDeadlines(),
+      const [tds, hr, basic, weekly, sch, consults, semId] = await Promise.all([
+        getTodos(),
         getHomeroom(date),
         getBasicTimetable(),
         getWeeklyTimetable(weekKey),
         getSchedules(),
         getConsultations(),
+        getActiveSemesterId(),
       ])
-      setDeadlines(dl)
+      setTodos(tds)
       setHomeroom(hr)
       setHomeroomDraft(hr)
       setSchedules(sch)
       setConsultations(consults)
+      setSemesterId(semId)
 
       if (!dayKey) { setLessons([]); setLoading(false); return }
 
@@ -82,7 +89,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
       for (const p of PERIODS) {
         const cn = dayData[String(p)] || dayData[p]
         if (cn && cn.trim()) {
-          const logs = await getProgressLogs(cn)
+          const logs = await getProgressLogs(cn, semId)
           const lastDone = [...logs]
             .filter(l => l.status === 'done' && l.date < date)
             .sort((a, b) => b.date.localeCompare(a.date))[0]
@@ -104,22 +111,53 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
   }, [date, weekKey, dayKey])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { setShowAllDeadlines(false); setShowQuickAdd(false) }, [date])
+  useEffect(() => { setShowAddTodo(false); setEditingTodoId(null); setShowQuickAdd(false) }, [date])
 
-  // ── 마감 임박 ─────────────────────────────────────────────
-  const toggleDeadline = async (realIdx) => {
-    const updated = deadlines.map((d, i) => i === realIdx ? { ...d, done: !d.done } : d)
-    setDeadlines(updated)
-    await saveDeadlines(updated)
+  // ── 📝 할 일 ──────────────────────────────────────────────
+  const toggleTodo = async (id) => {
+    const updated = todos.map(t => t.id === id ? { ...t, done: !t.done } : t)
+    setTodos(updated)
+    await saveTodos(updated)
   }
 
-  const allPending = deadlines
-    .filter(d => !d.done)
-    .sort((a, b) => a.date.localeCompare(b.date))
+  const addTodo = async () => {
+    if (!todoForm.content.trim()) return
+    const newItem = { id: `todo-${Date.now()}`, content: todoForm.content.trim(), dueDate: todoForm.dueDate, done: false }
+    const updated = [...todos, newItem]
+    setTodos(updated)
+    await saveTodos(updated)
+    setTodoForm({ content: '', dueDate: '' })
+    setShowAddTodo(false)
+  }
 
-  const urgentDeadlines = showAllDeadlines
-    ? allPending
-    : allPending.slice(0, 3)
+  const startEditTodo = (t) => {
+    setEditingTodoId(t.id)
+    setEditTodoForm({ content: t.content, dueDate: t.dueDate || '' })
+  }
+
+  const saveEditTodo = async () => {
+    if (!editTodoForm.content.trim()) return
+    const updated = todos.map(t => t.id === editingTodoId ? { ...t, content: editTodoForm.content.trim(), dueDate: editTodoForm.dueDate } : t)
+    setTodos(updated)
+    await saveTodos(updated)
+    setEditingTodoId(null)
+  }
+
+  const deleteTodo = async (id) => {
+    const updated = todos.filter(t => t.id !== id)
+    setTodos(updated)
+    await saveTodos(updated)
+  }
+
+  const pendingTodos = todos.filter(t => !t.done)
+  const doneTodos    = todos.filter(t => t.done)
+
+  const visibleTodos = pendingTodos
+    .filter(t => {
+      if (!t.dueDate) return true
+      return daysUntilFrom(t.dueDate, date) <= 7
+    })
+    .sort((a, b) => (a.dueDate || '9999-99-99').localeCompare(b.dueDate || '9999-99-99'))
 
   // ── 토스트 ────────────────────────────────────────────────
   const showToast = (field, msg = '') => {
@@ -145,7 +183,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
   const completeLesson = async (lesson, setCompleting) => {
     setCompleting(true)
     try {
-      const freshLogs = await getProgressLogs(lesson.className)
+      const freshLogs = await getProgressLogs(lesson.className, semesterId)
       const content   = (lesson.editedThisClass ?? lesson.thisClass) || ''
       const lastNote  = (lesson.editedLastClass  ?? lesson.lastClass) || ''
       const idx       = freshLogs.findIndex(l => l.date === date)
@@ -161,7 +199,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
       if (idx >= 0) updated[idx] = entry
       else updated.push(entry)
 
-      await saveProgressLog(lesson.className, updated)
+      await saveProgressLog(lesson.className, updated, semesterId)
       showToast('complete', '✅ 저장됨')
       await load()
     } catch(e) {
@@ -174,12 +212,12 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
   // ── 수업 완료 취소 ────────────────────────────────────────
   const uncompleteLesson = async (lesson) => {
     try {
-      const freshLogs = await getProgressLogs(lesson.className)
+      const freshLogs = await getProgressLogs(lesson.className, semesterId)
       const idx = freshLogs.findIndex(l => l.date === date)
       if (idx < 0) return
       const updated = [...freshLogs]
       updated[idx] = { ...freshLogs[idx], status: 'plan' }
-      await saveProgressLog(lesson.className, updated)
+      await saveProgressLog(lesson.className, updated, semesterId)
       showToast('complete', '↩️ 완료 취소됨')
       await load()
     } catch(e) {
@@ -191,7 +229,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
   // ── 내용 편집 저장 ────────────────────────────────────────
   const saveEditedLesson = async (lesson, draftLast, draftThis) => {
     try {
-      const freshLogs = await getProgressLogs(lesson.className)
+      const freshLogs = await getProgressLogs(lesson.className, semesterId)
       const idx = freshLogs.findIndex(l => l.date === date)
       const updated = [...freshLogs]
       if (idx >= 0) {
@@ -210,7 +248,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
           status:        'plan',
         })
       }
-      await saveProgressLog(lesson.className, updated)
+      await saveProgressLog(lesson.className, updated, semesterId)
       showToast('complete', '✅ 저장됨')
       await load()
     } catch(e) {
@@ -361,50 +399,122 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
         </div>
       )}
 
-      {/* 마감 임박 */}
-      {allPending.length > 0 && (
-        <section className="card">
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
-            <div className="section-label" style={{ margin:0 }}>⏰ 마감 임박</div>
-            <button
-              onClick={() => setShowAllDeadlines(p => !p)}
-              style={{
-                fontSize:'0.72rem', color:'var(--mint-600)',
-                background:'var(--mint-100)', padding:'3px 10px',
-                borderRadius:'20px', fontWeight:600
-              }}
-            >
-              {showAllDeadlines ? '접기 ▲' : `전체 보기 (${allPending.length}개) ▼`}
-            </button>
+      {/* 할 일 */}
+      <section className="card">
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
+          <div className="section-label" style={{ margin:0 }}>📝 할 일</div>
+          <button
+            onClick={() => setShowAddTodo(p => !p)}
+            style={{
+              width:'28px',height:'28px',borderRadius:'50%',
+              background:'var(--mint-500)',color:'#fff',
+              fontSize:'1.1rem',fontWeight:700,
+              display:'flex',alignItems:'center',justifyContent:'center',
+              flexShrink:0
+            }}
+          >+</button>
+        </div>
+
+        {showAddTodo && (
+          <div style={{
+            background:'var(--mint-50)',border:'1px solid var(--mint-200)',
+            borderRadius:'10px',padding:'12px',marginBottom:'12px',
+            display:'flex',flexDirection:'column',gap:'8px'
+          }}>
+            <input
+              value={todoForm.content}
+              onChange={e => setTodoForm(p => ({ ...p, content: e.target.value }))}
+              onKeyDown={e => { if (e.key === 'Enter') addTodo() }}
+              placeholder="할 일 내용"
+              autoFocus
+            />
+            <input
+              type="date"
+              value={todoForm.dueDate}
+              onChange={e => setTodoForm(p => ({ ...p, dueDate: e.target.value }))}
+            />
+            <div style={{ display:'flex', gap:'8px' }}>
+              <button className="btn btn-primary btn-sm" onClick={addTodo}>추가</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => { setShowAddTodo(false); setTodoForm({ content:'', dueDate:'' }) }}>취소</button>
+            </div>
           </div>
-          {urgentDeadlines.length === 0 ? (
-            <div className="empty" style={{ padding:'8px 0' }}>D-7 이내 마감 없음</div>
-          ) : urgentDeadlines.map((d, i) => {
-            const realIdx = deadlines.indexOf(d)
-            const diff    = daysUntilFrom(d.date, date)
-            const overdue = diff < 0
-            const tagCls  = overdue ? 'tag-overdue' : (diff <= 3 ? 'tag-red' : 'tag-yellow')
-            const label   = overdue ? `D+${-diff}` : (diff === 0 ? 'D-Day' : `D-${diff}`)
+        )}
+
+        {visibleTodos.length === 0 ? (
+          <div className="empty" style={{ padding:'8px 0' }}>할 일이 없어요</div>
+        ) : visibleTodos.map(t => {
+          if (editingTodoId === t.id) {
             return (
-              <div key={i} className="deadline-item">
-                <button
-                  className={`check-circle${d.done ? ' checked' : ''}`}
-                  onClick={() => toggleDeadline(realIdx)}
-                >
-                  {d.done ? '✓' : ''}
-                </button>
-                <div style={{ flex:1 }}>
-                  <span className={d.done ? 'strikethrough' : (overdue ? 'overdue-text' : '')}>{d.title}</span>
-                  <div style={{ fontSize:'0.75rem', color:'var(--gray-400)', marginTop:'2px' }}>
-                    {formatDate(d.date)}
-                  </div>
+              <div key={t.id} className="inline-edit-card">
+                <input
+                  value={editTodoForm.content}
+                  onChange={e => setEditTodoForm(p => ({ ...p, content: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') saveEditTodo(); if (e.key === 'Escape') setEditingTodoId(null) }}
+                  placeholder="할 일 내용"
+                  autoFocus
+                />
+                <input
+                  type="date"
+                  value={editTodoForm.dueDate}
+                  onChange={e => setEditTodoForm(p => ({ ...p, dueDate: e.target.value }))}
+                />
+                <div style={{ display:'flex', gap:'8px' }}>
+                  <button className="btn btn-primary btn-sm" onClick={saveEditTodo}>저장</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setEditingTodoId(null)}>취소</button>
                 </div>
-                <span className={`tag ${tagCls}`}>{label}</span>
               </div>
             )
-          })}
-        </section>
-      )}
+          }
+          const diff    = t.dueDate ? daysUntilFrom(t.dueDate, date) : null
+          const overdue = diff !== null && diff < 0
+          const tagCls  = overdue ? 'tag-overdue' : (diff !== null && diff <= 3 ? 'tag-red' : 'tag-yellow')
+          const label   = diff === null ? '' : (overdue ? `D+${-diff}` : (diff === 0 ? 'D-Day' : `D-${diff}`))
+          return (
+            <div key={t.id} className="deadline-item">
+              <button
+                className={`check-circle${t.done ? ' checked' : ''}`}
+                onClick={() => toggleTodo(t.id)}
+              >
+                {t.done ? '✓' : ''}
+              </button>
+              <div style={{ flex:1, cursor:'pointer' }} onClick={() => startEditTodo(t)}>
+                <span className={overdue ? 'overdue-text' : ''}>{t.content}</span>
+                {t.dueDate && (
+                  <div style={{ fontSize:'0.75rem', color:'var(--gray-400)', marginTop:'2px' }}>
+                    {formatDate(t.dueDate)}
+                  </div>
+                )}
+              </div>
+              {label && <span className={`tag ${tagCls}`}>{label}</span>}
+              <button className="btn btn-danger btn-icon" onClick={() => deleteTodo(t.id)} style={{ width:'28px', height:'28px', minHeight:'unset', flexShrink:0 }}>✕</button>
+            </div>
+          )
+        })}
+
+        {doneTodos.length > 0 && (
+          <>
+            <button
+              onClick={() => setShowDoneTodos(p => !p)}
+              style={{
+                width:'100%',marginTop:'8px',padding:'8px',
+                background:'none',border:'1px dashed var(--gray-300)',
+                borderRadius:'8px',color:'var(--gray-400)',fontSize:'0.82rem',cursor:'pointer'
+              }}
+            >
+              {showDoneTodos ? '완료 접기 ▲' : `완료 ${doneTodos.length}건 ▼`}
+            </button>
+            {showDoneTodos && doneTodos.map(t => (
+              <div key={t.id} className="deadline-item">
+                <button className="check-circle checked" onClick={() => toggleTodo(t.id)}>✓</button>
+                <div style={{ flex:1 }}>
+                  <span className="strikethrough">{t.content}</span>
+                </div>
+                <button className="btn btn-danger btn-icon" onClick={() => deleteTodo(t.id)} style={{ width:'28px', height:'28px', minHeight:'unset', flexShrink:0 }}>✕</button>
+              </div>
+            ))}
+          </>
+        )}
+      </section>
 
       {/* 조회 메모 */}
       <section className="card">
@@ -544,9 +654,9 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
               <span className="schedule-time">{s.time || '--:--'}</span>
               <div style={{flex:1}}>
                 <span style={{ fontSize:'0.9rem' }}>{s.content}</span>
-                {s.linkedDeadline && (
+                {s.linkedTodo && (
                   <div style={{fontSize:'0.72rem',color:'var(--gray-500)',marginTop:'2px'}}>
-                    📎 {s.linkedDeadline.title}
+                    📎 {s.linkedTodo.content}
                   </div>
                 )}
               </div>
@@ -594,17 +704,22 @@ function LessonCard({ lesson, isToday, onComplete, onUncomplete, onSaveFields, o
   }
 
   const isDone         = lesson.todayEntry?.status === 'done'
+  const isHoliday      = lesson.todayEntry?.status === 'holiday'
   const displayLast    = lesson.editedLastClass ?? lesson.lastClass
   const displayThis    = lesson.editedThisClass ?? lesson.thisClass
   const completeLabel  = isToday ? '✅ 수업 완료' : '📌 계획 저장'
   const uncompleteLabel = isToday ? '↩️ 완료 취소' : '↩️ 계획 취소'
 
   return (
-    <div className="lesson-card" style={isDone ? { opacity:0.7, borderLeftColor:'var(--mint-300)' } : {}}>
+    <div className="lesson-card" style={
+      isHoliday ? { opacity:0.6, borderLeftColor:'#d45880' } :
+      isDone    ? { opacity:0.7, borderLeftColor:'var(--mint-300)' } : {}
+    }>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'4px' }}>
         <div className="lesson-period">{lesson.period}교시</div>
-        {isDone && <span className="tag tag-green" style={{ fontSize:'0.7rem' }}>✅ 완료</span>}
-        {lesson.todayEntry?.status === 'plan' && (
+        {isHoliday && <span className="tag tag-red" style={{ fontSize:'0.7rem' }}>🔴 휴강</span>}
+        {!isHoliday && isDone && <span className="tag tag-green" style={{ fontSize:'0.7rem' }}>✅ 완료</span>}
+        {!isHoliday && lesson.todayEntry?.status === 'plan' && (
           <span className="tag tag-mint" style={{ fontSize:'0.7rem' }}>📌 계획</span>
         )}
       </div>
@@ -662,7 +777,11 @@ function LessonCard({ lesson, isToday, onComplete, onUncomplete, onSaveFields, o
           </div>
           <div className="lesson-actions">
             <button className="btn btn-secondary btn-sm" onClick={startEdit}>✏️ 편집</button>
-            {isDone ? (
+            {isHoliday ? (
+              <span style={{ fontSize:'0.8rem', color:'#d45880', fontWeight:600, display:'flex', alignItems:'center' }}>
+                휴강으로 수업 없음
+              </span>
+            ) : isDone ? (
               <button className="btn btn-secondary btn-sm" onClick={onUncomplete}
                 style={{ color:'var(--gray-500)' }}>
                 {uncompleteLabel}

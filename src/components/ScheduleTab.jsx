@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   getSchedules, saveSchedules,
-  getDeadlines, saveDeadlines,
+  getTodos, saveTodos,
   getConsultations, saveConsultations,
 } from '../firebase'
 import { getToday, formatDate, daysUntil } from '../utils'
@@ -208,9 +208,9 @@ function ConsultationManager() {
 // ── 📌 일정 ──────────────────────────────────────────────────
 function ScheduleManager() {
   const [items,        setItems]        = useState([])
-  const [form,         setForm]         = useState({ date: getToday(), time: '', content: '', deadlineTitle: '', deadlineDate: '' })
+  const [form,         setForm]         = useState({ date: getToday(), time: '', content: '', todoContent: '', todoDate: '' })
   const [timeMode,     setTimeMode]     = useState('period')
-  const [showDeadline, setShowDeadline] = useState(false)
+  const [showTodo,     setShowTodo]     = useState(false)
   const [saving,       setSaving]       = useState(false)
   const [editId,       setEditId]       = useState(null)
   const [editForm,     setEditForm]     = useState({ date:'', time:'', content:'' })
@@ -231,25 +231,24 @@ function ScheduleManager() {
     if (!form.content.trim()) return
     setSaving(true)
 
-    let linkedDeadline = null
-    if (showDeadline && form.deadlineTitle.trim() && form.deadlineDate) {
-      const dlId = `dl-${Date.now()}`
-      linkedDeadline = { id: dlId, title: form.deadlineTitle.trim(), date: form.deadlineDate }
-      const deadlines = await getDeadlines()
-      const updatedDl = [...deadlines, { id: dlId, title: linkedDeadline.title, date: linkedDeadline.date, done: false }]
-        .sort((a,b) => a.date.localeCompare(b.date))
-      await saveDeadlines(updatedDl)
+    let linkedTodo = null
+    if (showTodo && form.todoContent.trim()) {
+      const todoId = `todo-${Date.now()}`
+      linkedTodo = { id: todoId, content: form.todoContent.trim(), dueDate: form.todoDate }
+      const todos = await getTodos()
+      const updatedTodos = [...todos, { id: todoId, content: linkedTodo.content, dueDate: linkedTodo.dueDate, done: false }]
+      await saveTodos(updatedTodos)
     }
 
     const newItem = { id: Date.now().toString(), date: form.date, time: form.time, content: form.content }
-    if (linkedDeadline) newItem.linkedDeadline = linkedDeadline
+    if (linkedTodo) newItem.linkedTodo = linkedTodo
 
     const updated = [...items, newItem]
       .sort((a,b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`))
     await saveSchedules(updated)
     setItems(updated)
-    setForm({ date: getToday(), time: '', content: '', deadlineTitle: '', deadlineDate: '' })
-    setShowDeadline(false)
+    setForm({ date: getToday(), time: '', content: '', todoContent: '', todoDate: '' })
+    setShowTodo(false)
     setSaving(false)
   }
 
@@ -273,9 +272,9 @@ function ScheduleManager() {
     setItems(updated)
   }
 
-  const deadlineLabel = (dl) => {
-    if (!dl) return ''
-    const diff = daysUntil(dl.date)
+  const todoLabel = (td) => {
+    if (!td || !td.dueDate) return ''
+    const diff = daysUntil(td.dueDate)
     return diff < 0 ? `D+${-diff}` : diff === 0 ? 'D-Day' : `D-${diff}`
   }
 
@@ -303,9 +302,9 @@ function ScheduleManager() {
             {formatDate(item.date)}{item.time ? ` ${item.time}` : ''}
           </div>
           <div style={{fontSize:'0.9rem'}}>{item.content}</div>
-          {item.linkedDeadline && (
+          {item.linkedTodo && (
             <div style={{fontSize:'0.72rem',color:'var(--gray-500)',marginTop:'3px'}}>
-              📎 {item.linkedDeadline.title} <span style={{fontWeight:700}}>{deadlineLabel(item.linkedDeadline)}</span>
+              📎 {item.linkedTodo.content} <span style={{fontWeight:700}}>{todoLabel(item.linkedTodo)}</span>
             </div>
           )}
         </div>
@@ -331,21 +330,21 @@ function ScheduleManager() {
 
         <button
           className="btn btn-secondary btn-sm"
-          onClick={() => setShowDeadline(p => !p)}
+          onClick={() => setShowTodo(p => !p)}
           style={{textAlign:'left',color:'var(--pink-600)'}}
         >
-          {showDeadline ? '📎 마감 연결 해제 ✕' : '📎 마감 함께 등록 (선택)'}
+          {showTodo ? '📎 할일 연결 해제 ✕' : '📎 할일 함께 등록 (선택)'}
         </button>
 
-        {showDeadline && (
+        {showTodo && (
           <div style={{background:'var(--pink-50)',borderRadius:'8px',padding:'10px',display:'flex',flexDirection:'column',gap:'8px',border:'1px solid var(--pink-200)'}}>
-            <div style={{fontSize:'0.75rem',fontWeight:700,color:'var(--pink-700)'}}>연결 마감 정보</div>
+            <div style={{fontSize:'0.75rem',fontWeight:700,color:'var(--pink-700)'}}>연결 할일 정보</div>
             <input
-              value={form.deadlineTitle}
-              onChange={e=>setForm(p=>({...p,deadlineTitle:e.target.value}))}
-              placeholder="마감 제목"
+              value={form.todoContent}
+              onChange={e=>setForm(p=>({...p,todoContent:e.target.value}))}
+              placeholder="할일 내용"
             />
-            <input type="date" value={form.deadlineDate} onChange={e=>setForm(p=>({...p,deadlineDate:e.target.value}))} />
+            <input type="date" value={form.todoDate} onChange={e=>setForm(p=>({...p,todoDate:e.target.value}))} placeholder="마감일 (선택)" />
           </div>
         )}
 
@@ -375,19 +374,19 @@ function ScheduleManager() {
   )
 }
 
-// ── ⏰ 마감 ──────────────────────────────────────────────────
-function DeadlineManager() {
+// ── 📝 할일 ──────────────────────────────────────────────────
+function TodoManager() {
   const [items,        setItems]        = useState([])
-  const [form,         setForm]         = useState({ title: '', date: '' })
+  const [form,         setForm]         = useState({ content: '', dueDate: '' })
   const [saving,       setSaving]       = useState(false)
   const [editId,       setEditId]       = useState(null)
-  const [editForm,     setEditForm]     = useState({ title:'', date:'' })
-  const [showActive,   setShowActive]   = useState(false)
+  const [editForm,     setEditForm]     = useState({ content:'', dueDate:'' })
+  const [showActive,   setShowActive]   = useState(true)
   const [showArchived, setShowArchived] = useState(false)
 
   useEffect(() => {
-    getDeadlines().then(data =>
-      setItems([...data].sort((a,b) => a.date.localeCompare(b.date)))
+    getTodos().then(data =>
+      setItems([...data].sort((a,b) => (a.dueDate||'9999-99-99').localeCompare(b.dueDate||'9999-99-99')))
     )
   }, [])
 
@@ -395,38 +394,39 @@ function DeadlineManager() {
   const archived = items.filter(i => i.done)
 
   const add = async () => {
-    if (!form.title.trim() || !form.date) return
-    const updated = [...items, { ...form, done: false, id: Date.now().toString() }]
-      .sort((a,b) => a.date.localeCompare(b.date))
+    if (!form.content.trim()) return
+    const updated = [...items, { ...form, content: form.content.trim(), done: false, id: `todo-${Date.now()}` }]
+      .sort((a,b) => (a.dueDate||'9999-99-99').localeCompare(b.dueDate||'9999-99-99'))
     setSaving(true)
-    await saveDeadlines(updated)
+    await saveTodos(updated)
     setItems(updated)
-    setForm({ title: '', date: '' })
+    setForm({ content: '', dueDate: '' })
     setSaving(false)
   }
 
   const startEdit = (item) => {
     setEditId(item.id)
-    setEditForm({ title: item.title, date: item.date })
+    setEditForm({ content: item.content, dueDate: item.dueDate || '' })
   }
 
   const saveEdit = async () => {
-    const updated = items.map(i => i.id === editId ? { ...i, ...editForm } : i)
-      .sort((a,b) => a.date.localeCompare(b.date))
-    await saveDeadlines(updated)
+    if (!editForm.content.trim()) return
+    const updated = items.map(i => i.id === editId ? { ...i, content: editForm.content.trim(), dueDate: editForm.dueDate } : i)
+      .sort((a,b) => (a.dueDate||'9999-99-99').localeCompare(b.dueDate||'9999-99-99'))
+    await saveTodos(updated)
     setItems(updated)
     setEditId(null)
   }
 
   const toggle = async (id) => {
     const updated = items.map(i => i.id===id ? {...i,done:!i.done} : i)
-    await saveDeadlines(updated)
+    await saveTodos(updated)
     setItems(updated)
   }
 
   const remove = async (id) => {
     const updated = items.filter(i => i.id!==id)
-    await saveDeadlines(updated)
+    await saveTodos(updated)
     setItems(updated)
   }
 
@@ -434,13 +434,13 @@ function DeadlineManager() {
     if (editId === item.id) return (
       <div key={item.id} className="inline-edit-card">
         <input
-          value={editForm.title}
-          onChange={e=>setEditForm(p=>({...p,title:e.target.value}))}
-          onKeyDown={e => { if (e.key === 'Enter' && editForm.date) saveEdit(); if (e.key === 'Escape') setEditId(null) }}
-          placeholder="마감 항목 제목"
+          value={editForm.content}
+          onChange={e=>setEditForm(p=>({...p,content:e.target.value}))}
+          onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditId(null) }}
+          placeholder="할 일 내용"
           autoFocus
         />
-        <input type="date" value={editForm.date} onChange={e=>setEditForm(p=>({...p,date:e.target.value}))} />
+        <input type="date" value={editForm.dueDate} onChange={e=>setEditForm(p=>({...p,dueDate:e.target.value}))} />
         <div style={{display:'flex',gap:'8px'}}>
           <button className="btn btn-primary btn-sm" onClick={saveEdit}>저장</button>
           <button className="btn btn-secondary btn-sm" onClick={() => setEditId(null)}>취소</button>
@@ -448,10 +448,10 @@ function DeadlineManager() {
       </div>
     )
 
-    const diff    = daysUntil(item.date)
-    const overdue = !item.done && diff < 0
-    const tagCls  = overdue ? 'tag-overdue' : (diff <= 3 ? 'tag-red' : 'tag-yellow')
-    const label   = overdue ? `D+${-diff}` : (diff === 0 ? 'D-Day' : `D-${diff}`)
+    const diff    = item.dueDate ? daysUntil(item.dueDate) : null
+    const overdue = !item.done && diff !== null && diff < 0
+    const tagCls  = overdue ? 'tag-overdue' : (diff !== null && diff <= 3 ? 'tag-red' : 'tag-yellow')
+    const label   = diff === null ? '' : (overdue ? `D+${-diff}` : (diff === 0 ? 'D-Day' : `D-${diff}`))
 
     return (
       <div key={item.id} className="deadline-item">
@@ -459,10 +459,10 @@ function DeadlineManager() {
           {item.done ? '✓' : ''}
         </button>
         <div style={{flex:1}}>
-          <span className={item.done ? 'strikethrough' : (overdue ? 'overdue-text' : '')}>{item.title}</span>
-          <div style={{fontSize:'0.75rem',color:'var(--gray-400)'}}>{formatDate(item.date)}</div>
+          <span className={item.done ? 'strikethrough' : (overdue ? 'overdue-text' : '')}>{item.content}</span>
+          {item.dueDate && <div style={{fontSize:'0.75rem',color:'var(--gray-400)'}}>{formatDate(item.dueDate)}</div>}
         </div>
-        {!item.done && <span className={`tag ${tagCls}`} style={{flexShrink:0}}>{label}</span>}
+        {!item.done && label && <span className={`tag ${tagCls}`} style={{flexShrink:0}}>{label}</span>}
         <div style={{display:'flex',gap:'4px',alignItems:'center',flexShrink:0}}>
           <button className="icon-btn icon-btn-edit" onClick={() => startEdit(item)} title="수정">✏️</button>
           <button className="btn btn-danger btn-icon" onClick={() => remove(item.id)}>✕</button>
@@ -473,19 +473,19 @@ function DeadlineManager() {
 
   return (
     <section className="card">
-      <div className="section-label">⏰ 마감 관리</div>
+      <div className="section-label">📝 할일 관리</div>
       <div style={{display:'flex',flexDirection:'column',gap:'8px',marginBottom:'16px'}}>
         <input
-          value={form.title}
-          onChange={e=>setForm(p=>({...p,title:e.target.value}))}
-          onKeyDown={e => { if (e.key === 'Enter' && form.date) add() }}
-          placeholder="마감 항목 제목"
+          value={form.content}
+          onChange={e=>setForm(p=>({...p,content:e.target.value}))}
+          onKeyDown={e => { if (e.key === 'Enter') add() }}
+          placeholder="할 일 내용"
         />
-        <input type="date" value={form.date} onChange={e=>setForm(p=>({...p,date:e.target.value}))} />
+        <input type="date" value={form.dueDate} onChange={e=>setForm(p=>({...p,dueDate:e.target.value}))} placeholder="마감일 (선택)" />
         <button className="btn btn-primary" onClick={add} disabled={saving}>+ 추가</button>
       </div>
 
-      {/* 미완료 — 기본 접힘 */}
+      {/* 미완료 */}
       <button
         onClick={() => setShowActive(p => !p)}
         style={{
@@ -497,12 +497,12 @@ function DeadlineManager() {
           marginBottom: showActive && active.length > 0 ? '8px' : '0'
         }}
       >
-        <span>⏰ 미완료 ({active.length}개)</span>
+        <span>📝 미완료 ({active.length}개)</span>
         <span>{showActive ? '▲' : '▼'}</span>
       </button>
       {showActive && (
         active.length === 0
-          ? <div className="empty" style={{marginTop:'8px'}}>미완료 마감이 없어요</div>
+          ? <div className="empty" style={{marginTop:'8px'}}>미완료 할 일이 없어요</div>
           : active.map(renderItem)
       )}
 
@@ -517,7 +517,7 @@ function DeadlineManager() {
               borderRadius:'8px',color:'var(--gray-400)',fontSize:'0.82rem',cursor:'pointer'
             }}
           >
-            {showArchived ? '완료된 마감 접기 ▲' : `완료된 마감 보기 ▼ (${archived.length}개)`}
+            {showArchived ? '완료된 할 일 접기 ▲' : `완료된 할 일 보기 ▼ (${archived.length}개)`}
           </button>
           {showArchived && archived.map(renderItem)}
         </>
@@ -540,13 +540,13 @@ export default function ScheduleTab() {
           onClick={() => setSection('schedule')}
         >📌 일정</button>
         <button
-          className={`btn btn-sm ${section==='deadline'?'btn-primary':'btn-secondary'}`}
-          onClick={() => setSection('deadline')}
-        >⏰ 마감</button>
+          className={`btn btn-sm ${section==='todo'?'btn-primary':'btn-secondary'}`}
+          onClick={() => setSection('todo')}
+        >📝 할일</button>
       </div>
       {section === 'consult'  && <ConsultationManager />}
       {section === 'schedule' && <ScheduleManager />}
-      {section === 'deadline' && <DeadlineManager />}
+      {section === 'todo'     && <TodoManager />}
     </div>
   )
 }
