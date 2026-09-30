@@ -1,4 +1,5 @@
 import { initializeApp } from 'firebase/app'
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth'
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, addDoc, deleteDoc, query, orderBy } from 'firebase/firestore'
 import { getToday, getActiveSemester } from './utils'
 
@@ -13,6 +14,26 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig)
 export const db = getFirestore(app)
+
+// --- 로그인 (본인 계정만 자료 접근, Firestore 규칙과 동일한 이메일) ---
+export const auth = getAuth(app)
+export const ALLOWED_EMAIL = 'myogyeong87@gmail.com'
+
+export async function signInWithGoogle() {
+  const provider = new GoogleAuthProvider()
+  provider.setCustomParameters({ prompt: 'select_account' })
+  try {
+    await signInWithPopup(auth, provider)
+  } catch (e) {
+    // 팝업이 막힌 환경(일부 홈 화면 앱)에서는 페이지 이동 방식으로 재시도
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') {
+      await signInWithRedirect(auth, provider)
+    } else {
+      throw e
+    }
+  }
+}
+export const signOutUser = () => signOut(auth)
 
 export const SYNC_ID = 'kikisaem'
 

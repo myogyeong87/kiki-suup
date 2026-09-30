@@ -6,7 +6,7 @@ import {
   getProgressLogs, saveProgressLog,
   getCustomHolidays, saveCustomHolidays,
   getVacations, saveVacations,
-  exportAllData,
+  exportAllData, auth, signOutUser,
 } from '../firebase'
 import { DAYS, DAY_LABELS, PERIODS, getWeekKey, getNextWeekKey, getWeekDates, formatDate, uniqueClasses, getToday, getActiveSemester } from '../utils'
 
@@ -563,6 +563,12 @@ function BackupManager() {
           color: msg.startsWith('✅') ? 'var(--pink-600)' : 'var(--gray-500)'
         }}>{msg}</div>
       )}
+      <div style={{ marginTop:'16px', paddingTop:'12px', borderTop:'1px solid var(--gray-100)', display:'flex', alignItems:'center', gap:'8px' }}>
+        <span style={{ flex:1, fontSize:'0.78rem', color:'var(--gray-500)', overflow:'hidden', textOverflow:'ellipsis' }}>
+          🔐 {auth.currentUser?.email}
+        </span>
+        <button className="btn btn-secondary btn-sm" onClick={() => { if (window.confirm('로그아웃할까요?')) signOutUser() }}>로그아웃</button>
+      </div>
     </section>
   )
 }
