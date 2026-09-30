@@ -66,11 +66,11 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
       const [tds, hr, basic, weekly, sch, consults, semId] = await Promise.all([
         getTodos(),
         getHomeroom(date),
-        getBasicTimetable(),
+        getBasicTimetable(date),
         getWeeklyTimetable(weekKey),
         getSchedules(),
         getConsultations(),
-        getActiveSemesterId(),
+        getActiveSemesterId(date),
       ])
       setTodos(tds)
       setHomeroom(hr)

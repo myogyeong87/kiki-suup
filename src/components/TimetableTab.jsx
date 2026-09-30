@@ -6,6 +6,7 @@ import {
   getProgressLogs, saveProgressLog,
   getCustomHolidays, saveCustomHolidays,
   getVacations, saveVacations,
+  exportAllData,
 } from '../firebase'
 import { DAYS, DAY_LABELS, PERIODS, getWeekKey, getNextWeekKey, getWeekDates, formatDate, uniqueClasses, getToday, getActiveSemester } from '../utils'
 
@@ -72,7 +73,17 @@ function SemesterManager() {
     setSaved(false)
   }
 
+  const updateInfo = (field, val) => {
+    setSemesters(prev => prev.map(s => s.id === editingId ? { ...s, [field]: val } : s))
+    setSaved(false)
+  }
+
   const saveGrid = async () => {
+    const cur = semesters.find(s => s.id === editingId)
+    if (!cur?.name?.trim() || !cur?.startDate) { alert('학기 이름과 시작일을 입력해 주세요'); return }
+    if (semesters.some(s => s.id !== cur.id && s.startDate === cur.startDate)) {
+      alert('다른 학기와 시작일이 같아요. 시작일을 다르게 입력해 주세요'); return
+    }
     setSaving(true)
     await saveSemesters(semesters)
     setSaving(false); setSaved(true)
@@ -131,7 +142,16 @@ function SemesterManager() {
 
       {editingSemester && (
         <>
-          <div className="section-label" style={{ marginTop:'16px' }}>✏️ {editingSemester.name} 시간표</div>
+          <div className="section-label" style={{ marginTop:'16px' }}>✏️ 학기 정보</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', marginBottom:'12px' }}>
+            <input
+              value={editingSemester.name}
+              onChange={e => updateInfo('name', e.target.value)}
+              placeholder="예: 2026년 1학기"
+            />
+            <input type="date" value={editingSemester.startDate} onChange={e => updateInfo('startDate', e.target.value)} />
+          </div>
+          <div className="section-label">🗓️ {editingSemester.name} 시간표</div>
           <TimetableGrid grid={editingSemester.timetable} onUpdate={updateGrid} />
           <button className="btn btn-primary w-full mt-16" onClick={saveGrid} disabled={saving}>
             {saving ? '저장 중...' : saved ? '✓ 저장됨' : '저장'}
@@ -162,13 +182,13 @@ async function applyProgressLogic(weekKey, grid, prevGrid = {}) {
   }
 
   // 확인 대상 반: 기본 시간표 + 이전 주간 시간표 + 현재 시간표
-  const basicTT = await getBasicTimetable()
+  const basicTT = await getBasicTimetable(weekDates.mon)
   const allClasses = new Set([
     ...uniqueClasses(basicTT),
     ...uniqueClasses(prevGrid),
     ...Object.keys(classDateMap),
   ])
-  const semesterId = await getActiveSemesterId()
+  const semesterId = await getActiveSemesterId(weekDates.mon)
 
   let added = 0, cleaned = 0
 
@@ -218,7 +238,7 @@ async function saveAndApply(weekKey, grid) {
   notifyTimetableUpdated()
 
   // 오늘/내일 탭과 같은 기준: 주간 시간표에 없는 요일은 기본 시간표 사용
-  const basic = await getBasicTimetable()
+  const basic = await getBasicTimetable(getWeekDates(weekKey).mon)
   const effective = {}
   for (const day of DAYS) {
     effective[day] = (grid[day] && Object.keys(grid[day]).length) ? grid[day] : (basic[day] || {})
@@ -264,7 +284,7 @@ function WeekTimetableEditor({ weekKey, title, extraLoaders = [] }) {
     <section className="card">
       <div className="section-label">{title} ({weekKey})</div>
       <div style={{display:'flex',gap:'8px',marginBottom:'12px',flexWrap:'wrap'}}>
-        <button className="btn btn-secondary btn-sm" onClick={() => loadFrom(getBasicTimetable)}>기본 시간표 불러오기</button>
+        <button className="btn btn-secondary btn-sm" onClick={() => loadFrom(() => getBasicTimetable(getWeekDates(weekKey).mon))}>기본 시간표 불러오기</button>
         {extraLoaders.map(l => (
           <button key={l.label} className="btn btn-secondary btn-sm" onClick={() => loadFrom(l.load)}>{l.label}</button>
         ))}
@@ -505,6 +525,48 @@ function HolidayManager({ onHolidaysChange }) {
   )
 }
 
+function BackupManager() {
+  const [busy, setBusy] = useState(false)
+  const [msg,  setMsg]  = useState('')
+
+  const download = async () => {
+    setBusy(true); setMsg('')
+    try {
+      const data = await exportAllData()
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `마법빗자루-백업-${getToday()}.json`
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+      setMsg('✅ 백업 파일을 저장했어요')
+    } catch(e) {
+      setMsg('오류가 발생했습니다'); console.error(e)
+    }
+    setBusy(false)
+  }
+
+  return (
+    <section className="card">
+      <div className="section-label">💾 전체 자료 백업</div>
+      <div style={{ fontSize:'0.8rem', color:'var(--gray-500)', lineHeight:1.6, marginBottom:'12px' }}>
+        학기·시간표·진도표·일정·상담·할 일·조회/종례·휴일·방학 자료를 파일 하나(JSON)로 저장합니다.
+        학년도가 바뀌기 전에 한 번씩 받아 두면 안심이에요.
+      </div>
+      <button className="btn btn-primary w-full" onClick={download} disabled={busy}>
+        {busy ? '백업 만드는 중...' : '📥 백업 파일 내려받기'}
+      </button>
+      {msg && (
+        <div style={{
+          marginTop:'8px',fontSize:'0.82rem',textAlign:'center',fontWeight:600,
+          color: msg.startsWith('✅') ? 'var(--pink-600)' : 'var(--gray-500)'
+        }}>{msg}</div>
+      )}
+    </section>
+  )
+}
+
 export default function TimetableTab({ onHolidaysChange }) {
   const [section, setSection] = useState('semester')
   const sections = [
@@ -512,6 +574,7 @@ export default function TimetableTab({ onHolidaysChange }) {
     { id:'weekly',      label:'이번 주' },
     { id:'nextweekly',  label:'다음 주' },
     { id:'holiday',     label:'휴일 관리' },
+    { id:'backup',      label:'백업' },
   ]
   return (
     <div className="page" style={{display:'flex',flexDirection:'column',gap:'16px'}}>
@@ -528,6 +591,7 @@ export default function TimetableTab({ onHolidaysChange }) {
       {section === 'weekly'      && <WeeklyTimetable />}
       {section === 'nextweekly'  && <NextWeeklyTimetable />}
       {section === 'holiday'     && <HolidayManager onHolidaysChange={onHolidaysChange} />}
+      {section === 'backup'      && <BackupManager />}
     </div>
   )
 }

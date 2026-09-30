@@ -34,17 +34,17 @@ export async function saveSemesters(items) {
   await setDoc(doc(db, 'semesters', SYNC_ID), { items })
 }
 
-// 오늘 날짜 기준 자동 적용되는 학기의 시간표 그리드
-export async function getBasicTimetable() {
+// 날짜(기본: 오늘) 기준 자동 적용되는 학기의 시간표 그리드
+export async function getBasicTimetable(dateStr = getToday()) {
   const semesters = await getSemesters()
-  const active = getActiveSemester(semesters, getToday())
+  const active = getActiveSemester(semesters, dateStr)
   return active?.timetable || {}
 }
 
-// 오늘 날짜 기준 자동 적용되는 학기 id (진도표 저장 키 스코핑용)
-export async function getActiveSemesterId() {
+// 날짜(기본: 오늘) 기준 자동 적용되는 학기 id (진도표 저장 키 스코핑용)
+export async function getActiveSemesterId(dateStr = getToday()) {
   const semesters = await getSemesters()
-  const active = getActiveSemester(semesters, getToday())
+  const active = getActiveSemester(semesters, dateStr)
   return active?.id || 'default'
 }
 
@@ -159,4 +159,25 @@ export async function getVacations() {
 }
 export async function saveVacations(items) {
   await setDoc(doc(db, 'vacations', SYNC_ID), { items })
+}
+
+// --- 전체 백업 ---
+const BACKUP_COLLECTIONS = [
+  'semesters', 'weeklyTimetable', 'progressLogs', 'homeroom',
+  'schedules', 'todos', 'consultations', 'holidays', 'vacations',
+  'basicTimetable', 'deadlines', // 예전 형식 (마이그레이션 전 원본)
+]
+
+// { exportedAt, collections: { 컬렉션명: { 문서id: 데이터 } } }
+export async function exportAllData() {
+  const collections = {}
+  for (const name of BACKUP_COLLECTIONS) {
+    const snap = await getDocs(collection(db, name))
+    const docs = {}
+    snap.forEach(d => {
+      if (d.id === SYNC_ID || d.id.startsWith(`${SYNC_ID}_`)) docs[d.id] = d.data()
+    })
+    collections[name] = docs
+  }
+  return { app: 'kiki-suup', version: 1, exportedAt: new Date().toISOString(), collections }
 }
