@@ -111,6 +111,17 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
   }, [date, weekKey, dayKey])
 
   useEffect(() => { load() }, [load])
+
+  // 시간표 저장/반영 시, 앱으로 돌아왔을 때 최신 시간표로 다시 불러오기
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') load() }
+    window.addEventListener('timetable-updated', load)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('timetable-updated', load)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [load])
   useEffect(() => { setShowAddTodo(false); setEditingTodoId(null); setShowQuickAdd(false) }, [date])
 
   // ── 📝 할 일 ──────────────────────────────────────────────

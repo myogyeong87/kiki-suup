@@ -202,6 +202,11 @@ async function applyProgressLogic(weekKey, grid) {
   return { added, cleaned }
 }
 
+// 시간표 변경 알림 (오늘/내일 탭이 즉시 다시 불러오도록)
+function notifyTimetableUpdated() {
+  window.dispatchEvent(new Event('timetable-updated'))
+}
+
 function WeeklyTimetable() {
   const weekKey = getWeekKey()
   const [grid,     setGrid]     = useState({})
@@ -225,6 +230,7 @@ function WeeklyTimetable() {
   const save = async () => {
     setSaving(true)
     await saveWeeklyTimetable(weekKey, grid)
+    notifyTimetableUpdated()
     setSaving(false); setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -238,6 +244,9 @@ function WeeklyTimetable() {
         setTimeout(() => setApplyMsg(''), 3000)
         return
       }
+      // 반영 전 현재 그리드를 먼저 저장 → 오늘/내일 탭도 같은 시간표 기준으로 표시
+      await saveWeeklyTimetable(weekKey, grid)
+      notifyTimetableUpdated()
       const { added, cleaned } = await applyProgressLogic(weekKey, grid)
       let msg = ''
       if (added > 0 && cleaned > 0) msg = `✅ ${added}건 추가, ${cleaned}건 정리됨`
@@ -314,6 +323,7 @@ function NextWeeklyTimetable() {
   const save = async () => {
     setSaving(true)
     await saveWeeklyTimetable(nextWeekKey, grid)
+    notifyTimetableUpdated()
     setSaving(false); setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -327,6 +337,9 @@ function NextWeeklyTimetable() {
         setTimeout(() => setApplyMsg(''), 3000)
         return
       }
+      // 반영 전 현재 그리드를 먼저 저장 → 오늘/내일 탭도 같은 시간표 기준으로 표시
+      await saveWeeklyTimetable(nextWeekKey, grid)
+      notifyTimetableUpdated()
       const { added, cleaned } = await applyProgressLogic(nextWeekKey, grid)
       let msg = ''
       if (added > 0 && cleaned > 0) msg = `✅ ${added}건 추가, ${cleaned}건 정리됨`
