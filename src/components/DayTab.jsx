@@ -49,7 +49,7 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
   const [loading,          setLoading]           = useState(true)
   const [toastField,       setToastField]        = useState(null)
   const [toastMsg,         setToastMsg]          = useState('')
-  const [showDoneTodos,    setShowDoneTodos]     = useState(false)
+  const [showLaterTodos,   setShowLaterTodos]    = useState(false)
   const [showAddTodo,      setShowAddTodo]       = useState(false)
   const [todoForm,         setTodoForm]          = useState({ content: '', dueDate: '' })
   const [editingTodoId,    setEditingTodoId]     = useState(null)
@@ -149,15 +149,64 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
     await saveTodos(updated)
   }
 
-  const pendingTodos = todos.filter(t => !t.done)
-  const doneTodos    = todos.filter(t => t.done)
-
-  const visibleTodos = pendingTodos
-    .filter(t => {
-      if (!t.dueDate) return true
-      return daysUntilFrom(t.dueDate, date) <= 7
-    })
+  // 마감일 순 정렬, 마감일 없는 항목은 하단
+  const pendingTodos = todos
+    .filter(t => !t.done)
     .sort((a, b) => (a.dueDate || '9999-99-99').localeCompare(b.dueDate || '9999-99-99'))
+
+  // D-7 이내(지난 마감 포함)는 바로 표시, 그 이후·마감일 없음은 드롭다운
+  const isSoon       = t => t.dueDate && daysUntilFrom(t.dueDate, date) <= 7
+  const visibleTodos = pendingTodos.filter(isSoon)
+  const laterTodos   = pendingTodos.filter(t => !isSoon(t))
+
+  const renderTodo = (t) => {
+    if (editingTodoId === t.id) {
+      return (
+        <div key={t.id} className="inline-edit-card">
+          <input
+            value={editTodoForm.content}
+            onChange={e => setEditTodoForm(p => ({ ...p, content: e.target.value }))}
+            onKeyDown={e => { if (e.key === 'Enter') saveEditTodo(); if (e.key === 'Escape') setEditingTodoId(null) }}
+            placeholder="할 일 내용"
+            autoFocus
+          />
+          <input
+            type="date"
+            value={editTodoForm.dueDate}
+            onChange={e => setEditTodoForm(p => ({ ...p, dueDate: e.target.value }))}
+          />
+          <div style={{ display:'flex', gap:'8px' }}>
+            <button className="btn btn-primary btn-sm" onClick={saveEditTodo}>저장</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setEditingTodoId(null)}>취소</button>
+          </div>
+        </div>
+      )
+    }
+    const diff    = t.dueDate ? daysUntilFrom(t.dueDate, date) : null
+    const overdue = diff !== null && diff < 0
+    const tagCls  = overdue ? 'tag-overdue' : (diff !== null && diff <= 3 ? 'tag-red' : 'tag-yellow')
+    const label   = diff === null ? '' : (overdue ? `D+${-diff}` : (diff === 0 ? 'D-Day' : `D-${diff}`))
+    return (
+      <div key={t.id} className="deadline-item">
+        <button
+          className={`check-circle${t.done ? ' checked' : ''}`}
+          onClick={() => toggleTodo(t.id)}
+        >
+          {t.done ? '✓' : ''}
+        </button>
+        <div style={{ flex:1, cursor:'pointer' }} onClick={() => startEditTodo(t)}>
+          <span className={overdue ? 'overdue-text' : ''}>{t.content}</span>
+          {t.dueDate && (
+            <div style={{ fontSize:'0.75rem', color:'var(--gray-400)', marginTop:'2px' }}>
+              {formatDate(t.dueDate)}
+            </div>
+          )}
+        </div>
+        {label && <span className={`tag ${tagCls}`}>{label}</span>}
+        <button className="btn btn-danger btn-icon" onClick={() => deleteTodo(t.id)} style={{ width:'28px', height:'28px', minHeight:'unset', flexShrink:0 }}>✕</button>
+      </div>
+    )
+  }
 
   // ── 토스트 ────────────────────────────────────────────────
   const showToast = (field, msg = '') => {
@@ -442,76 +491,21 @@ export default function DayTab({ initialDate, navigable = false, holidays = [], 
 
         {visibleTodos.length === 0 ? (
           <div className="empty" style={{ padding:'8px 0' }}>할 일이 없어요</div>
-        ) : visibleTodos.map(t => {
-          if (editingTodoId === t.id) {
-            return (
-              <div key={t.id} className="inline-edit-card">
-                <input
-                  value={editTodoForm.content}
-                  onChange={e => setEditTodoForm(p => ({ ...p, content: e.target.value }))}
-                  onKeyDown={e => { if (e.key === 'Enter') saveEditTodo(); if (e.key === 'Escape') setEditingTodoId(null) }}
-                  placeholder="할 일 내용"
-                  autoFocus
-                />
-                <input
-                  type="date"
-                  value={editTodoForm.dueDate}
-                  onChange={e => setEditTodoForm(p => ({ ...p, dueDate: e.target.value }))}
-                />
-                <div style={{ display:'flex', gap:'8px' }}>
-                  <button className="btn btn-primary btn-sm" onClick={saveEditTodo}>저장</button>
-                  <button className="btn btn-secondary btn-sm" onClick={() => setEditingTodoId(null)}>취소</button>
-                </div>
-              </div>
-            )
-          }
-          const diff    = t.dueDate ? daysUntilFrom(t.dueDate, date) : null
-          const overdue = diff !== null && diff < 0
-          const tagCls  = overdue ? 'tag-overdue' : (diff !== null && diff <= 3 ? 'tag-red' : 'tag-yellow')
-          const label   = diff === null ? '' : (overdue ? `D+${-diff}` : (diff === 0 ? 'D-Day' : `D-${diff}`))
-          return (
-            <div key={t.id} className="deadline-item">
-              <button
-                className={`check-circle${t.done ? ' checked' : ''}`}
-                onClick={() => toggleTodo(t.id)}
-              >
-                {t.done ? '✓' : ''}
-              </button>
-              <div style={{ flex:1, cursor:'pointer' }} onClick={() => startEditTodo(t)}>
-                <span className={overdue ? 'overdue-text' : ''}>{t.content}</span>
-                {t.dueDate && (
-                  <div style={{ fontSize:'0.75rem', color:'var(--gray-400)', marginTop:'2px' }}>
-                    {formatDate(t.dueDate)}
-                  </div>
-                )}
-              </div>
-              {label && <span className={`tag ${tagCls}`}>{label}</span>}
-              <button className="btn btn-danger btn-icon" onClick={() => deleteTodo(t.id)} style={{ width:'28px', height:'28px', minHeight:'unset', flexShrink:0 }}>✕</button>
-            </div>
-          )
-        })}
+        ) : visibleTodos.map(renderTodo)}
 
-        {doneTodos.length > 0 && (
+        {laterTodos.length > 0 && (
           <>
             <button
-              onClick={() => setShowDoneTodos(p => !p)}
+              onClick={() => setShowLaterTodos(p => !p)}
               style={{
                 width:'100%',marginTop:'8px',padding:'8px',
                 background:'none',border:'1px dashed var(--gray-300)',
                 borderRadius:'8px',color:'var(--gray-400)',fontSize:'0.82rem',cursor:'pointer'
               }}
             >
-              {showDoneTodos ? '완료 접기 ▲' : `완료 ${doneTodos.length}건 ▼`}
+              {showLaterTodos ? '이후 할 일 접기 ▲' : `이후 할 일 ${laterTodos.length}건 ▼`}
             </button>
-            {showDoneTodos && doneTodos.map(t => (
-              <div key={t.id} className="deadline-item">
-                <button className="check-circle checked" onClick={() => toggleTodo(t.id)}>✓</button>
-                <div style={{ flex:1 }}>
-                  <span className="strikethrough">{t.content}</span>
-                </div>
-                <button className="btn btn-danger btn-icon" onClick={() => deleteTodo(t.id)} style={{ width:'28px', height:'28px', minHeight:'unset', flexShrink:0 }}>✕</button>
-              </div>
-            ))}
+            {showLaterTodos && laterTodos.map(renderTodo)}
           </>
         )}
       </section>
