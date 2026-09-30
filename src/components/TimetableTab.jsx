@@ -143,7 +143,8 @@ function SemesterManager() {
 }
 
 // 진도표 반영 공통 로직
-async function applyProgressLogic(weekKey, grid) {
+// prevGrid: 저장 전 시간표 (이번 주에만 있다가 빠진 반도 정리하기 위해)
+async function applyProgressLogic(weekKey, grid, prevGrid = {}) {
   const weekDates = getWeekDates(weekKey)
   const weekDateSet = new Set(Object.values(weekDates))
 
@@ -160,42 +161,45 @@ async function applyProgressLogic(weekKey, grid) {
     }
   }
 
-  // 기본 시간표에서 전체 반 목록
+  // 확인 대상 반: 기본 시간표 + 이전 주간 시간표 + 현재 시간표
   const basicTT = await getBasicTimetable()
-  const allKnownClasses = uniqueClasses(basicTT)
-  const currentClasses = new Set(Object.keys(classDateMap))
-  const removedClasses = allKnownClasses.filter(cn => !currentClasses.has(cn))
+  const allClasses = new Set([
+    ...uniqueClasses(basicTT),
+    ...uniqueClasses(prevGrid),
+    ...Object.keys(classDateMap),
+  ])
   const semesterId = await getActiveSemesterId()
 
   let added = 0, cleaned = 0
 
-  // 현재 시간표에 있는 반: 없는 날짜 항목만 추가
-  for (const [cn, dates] of Object.entries(classDateMap)) {
+  for (const cn of allClasses) {
+    const dates = classDateMap[cn] || new Set()
     const logs = await getProgressLogs(cn, semesterId)
-    let changed = false
-    for (const date of dates) {
-      if (logs.find(l => l.date === date)) continue // 이미 있으면 건드리지 않음
-      logs.push({
-        id: `${date}-${cn}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-        week: weekKey, date, content: '', status: 'plan',
-      })
-      changed = true; added++
-    }
-    if (changed) await saveProgressLog(cn, logs, semesterId)
-  }
 
-  // 시간표에서 빠진 반: 해당 주 날짜의 빈 plan 항목만 삭제 (내용 있거나 done/holiday는 유지)
-  for (const cn of removedClasses) {
-    const logs = await getProgressLogs(cn, semesterId)
-    const toKeep = logs.filter(l => {
+    // 수업 없는 날짜의 빈 plan 항목만 삭제 (내용 있거나 done/holiday는 유지)
+    const kept = logs.filter(l => {
       if (!weekDateSet.has(l.date)) return true
+      if (dates.has(l.date)) return true
       if ((l.content || '').trim()) return true
       if (l.status !== 'plan') return true
       return false
     })
-    if (toKeep.length !== logs.length) {
-      await saveProgressLog(cn, toKeep, semesterId)
-      cleaned += logs.length - toKeep.length
+    const removed = logs.length - kept.length
+
+    // 수업 있는 날짜 중 항목 없는 날짜만 추가
+    let addedHere = 0
+    for (const date of dates) {
+      if (kept.find(l => l.date === date)) continue // 이미 있으면 건드리지 않음
+      kept.push({
+        id: `${date}-${cn}-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        week: weekKey, date, content: '', status: 'plan',
+      })
+      addedHere++
+    }
+
+    if (removed || addedHere) {
+      await saveProgressLog(cn, kept, semesterId)
+      added += addedHere; cleaned += removed
     }
   }
 
@@ -207,184 +211,93 @@ function notifyTimetableUpdated() {
   window.dispatchEvent(new Event('timetable-updated'))
 }
 
-function WeeklyTimetable() {
-  const weekKey = getWeekKey()
-  const [grid,     setGrid]     = useState({})
-  const [saving,   setSaving]   = useState(false)
-  const [saved,    setSaved]    = useState(false)
-  const [applying, setApplying] = useState(false)
-  const [applyMsg, setApplyMsg] = useState('')
+// 시간표 저장 + 진도표 반영을 한 번에
+async function saveAndApply(weekKey, grid) {
+  const prevGrid = await getWeeklyTimetable(weekKey)
+  await saveWeeklyTimetable(weekKey, grid)
+  notifyTimetableUpdated()
+
+  // 오늘/내일 탭과 같은 기준: 주간 시간표에 없는 요일은 기본 시간표 사용
+  const basic = await getBasicTimetable()
+  const effective = {}
+  for (const day of DAYS) {
+    effective[day] = (grid[day] && Object.keys(grid[day]).length) ? grid[day] : (basic[day] || {})
+  }
+  return applyProgressLogic(weekKey, effective, prevGrid)
+}
+
+function saveResultMessage({ added, cleaned }) {
+  const parts = []
+  if (added > 0) parts.push(`진도표 ${added}건 추가`)
+  if (cleaned > 0) parts.push(`${cleaned}건 정리`)
+  return parts.length ? `✅ 저장됨 · ${parts.join(', ')}` : '✅ 저장됨'
+}
+
+function WeekTimetableEditor({ weekKey, title, extraLoaders = [] }) {
+  const [grid,   setGrid]   = useState({})
+  const [saving, setSaving] = useState(false)
+  const [msg,    setMsg]    = useState('')
 
   useEffect(() => { getWeeklyTimetable(weekKey).then(setGrid) }, [weekKey])
 
-  const loadFromBasic = async () => {
-    const basic = await getBasicTimetable()
-    setGrid(basic); setSaved(false)
+  const loadFrom = async (loader) => {
+    setGrid(await loader()); setMsg('')
   }
 
   const update = (day, period, val) => {
     setGrid(prev => ({ ...prev, [day]: { ...(prev[day]||{}), [period]: val } }))
-    setSaved(false)
+    setMsg('')
   }
 
   const save = async () => {
-    setSaving(true)
-    await saveWeeklyTimetable(weekKey, grid)
-    notifyTimetableUpdated()
-    setSaving(false); setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  const applyToProgress = async () => {
-    setApplying(true); setApplyMsg('')
+    setSaving(true); setMsg('')
     try {
-      if (Object.keys(grid).length === 0) {
-        setApplyMsg('저장된 시간표가 없습니다')
-        setApplying(false)
-        setTimeout(() => setApplyMsg(''), 3000)
-        return
-      }
-      // 반영 전 현재 그리드를 먼저 저장 → 오늘/내일 탭도 같은 시간표 기준으로 표시
-      await saveWeeklyTimetable(weekKey, grid)
-      notifyTimetableUpdated()
-      const { added, cleaned } = await applyProgressLogic(weekKey, grid)
-      let msg = ''
-      if (added > 0 && cleaned > 0) msg = `✅ ${added}건 추가, ${cleaned}건 정리됨`
-      else if (added > 0) msg = `✅ ${added}건 추가됨`
-      else if (cleaned > 0) msg = `✅ ${cleaned}건 정리됨`
-      else msg = '새로운 항목 없음'
-      setApplyMsg(msg)
+      setMsg(saveResultMessage(await saveAndApply(weekKey, grid)))
     } catch(e) {
-      setApplyMsg('오류가 발생했습니다'); console.error(e)
+      setMsg('오류가 발생했습니다'); console.error(e)
     }
-    setApplying(false)
-    setTimeout(() => setApplyMsg(''), 3000)
+    setSaving(false)
+    setTimeout(() => setMsg(''), 3000)
   }
 
   return (
     <section className="card">
-      <div className="section-label">🗓️ 이번 주 시간표 ({weekKey})</div>
+      <div className="section-label">{title} ({weekKey})</div>
       <div style={{display:'flex',gap:'8px',marginBottom:'12px',flexWrap:'wrap'}}>
-        <button className="btn btn-secondary btn-sm" onClick={loadFromBasic}>기본 시간표 불러오기</button>
+        <button className="btn btn-secondary btn-sm" onClick={() => loadFrom(getBasicTimetable)}>기본 시간표 불러오기</button>
+        {extraLoaders.map(l => (
+          <button key={l.label} className="btn btn-secondary btn-sm" onClick={() => loadFrom(l.load)}>{l.label}</button>
+        ))}
       </div>
       <TimetableGrid grid={grid} onUpdate={update} />
       <button className="btn btn-primary w-full mt-16" onClick={save} disabled={saving}>
-        {saving ? '저장 중...' : saved ? '✓ 저장됨' : '저장'}
+        {saving ? '저장 중...' : '저장'}
       </button>
-      <div style={{marginTop:'12px',borderTop:'1px solid var(--gray-100)',paddingTop:'12px'}}>
-        <button
-          className="btn btn-secondary w-full"
-          style={{background:'var(--pink-50)',color:'var(--pink-700)',border:'1.5px dashed var(--pink-300)'}}
-          onClick={applyToProgress}
-          disabled={applying}
-        >
-          {applying ? '처리 중...' : '📋 진도표에 반영'}
-        </button>
-        {applyMsg && (
-          <div style={{
-            marginTop:'8px',fontSize:'0.82rem',textAlign:'center',fontWeight:600,
-            color: applyMsg.startsWith('✅') ? 'var(--pink-600)' : 'var(--gray-500)'
-          }}>{applyMsg}</div>
-        )}
-        <div style={{fontSize:'0.72rem',color:'var(--gray-400)',marginTop:'6px',textAlign:'center'}}>
-          저장된 시간표를 진도표에 📌 계획 항목으로 추가합니다
-        </div>
+      {msg && (
+        <div style={{
+          marginTop:'8px',fontSize:'0.82rem',textAlign:'center',fontWeight:600,
+          color: msg.startsWith('✅') ? 'var(--pink-600)' : 'var(--gray-500)'
+        }}>{msg}</div>
+      )}
+      <div style={{fontSize:'0.72rem',color:'var(--gray-400)',marginTop:'6px',textAlign:'center'}}>
+        저장하면 진도표에도 자동 반영됩니다 (내용 없는 📌 계획 칸만 정리)
       </div>
     </section>
   )
 }
 
+function WeeklyTimetable() {
+  return <WeekTimetableEditor weekKey={getWeekKey()} title="🗓️ 이번 주 시간표" />
+}
+
 function NextWeeklyTimetable() {
-  const nextWeekKey = getNextWeekKey()
   const thisWeekKey = getWeekKey()
-  const [grid,     setGrid]     = useState({})
-  const [saving,   setSaving]   = useState(false)
-  const [saved,    setSaved]    = useState(false)
-  const [applying, setApplying] = useState(false)
-  const [applyMsg, setApplyMsg] = useState('')
-
-  useEffect(() => { getWeeklyTimetable(nextWeekKey).then(setGrid) }, [nextWeekKey])
-
-  const loadFromBasic = async () => {
-    const basic = await getBasicTimetable()
-    setGrid(basic); setSaved(false)
-  }
-
-  const loadFromThisWeek = async () => {
-    const thisWeek = await getWeeklyTimetable(thisWeekKey)
-    setGrid(thisWeek); setSaved(false)
-  }
-
-  const update = (day, period, val) => {
-    setGrid(prev => ({ ...prev, [day]: { ...(prev[day]||{}), [period]: val } }))
-    setSaved(false)
-  }
-
-  const save = async () => {
-    setSaving(true)
-    await saveWeeklyTimetable(nextWeekKey, grid)
-    notifyTimetableUpdated()
-    setSaving(false); setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  const applyToProgress = async () => {
-    setApplying(true); setApplyMsg('')
-    try {
-      if (Object.keys(grid).length === 0) {
-        setApplyMsg('저장된 시간표가 없습니다')
-        setApplying(false)
-        setTimeout(() => setApplyMsg(''), 3000)
-        return
-      }
-      // 반영 전 현재 그리드를 먼저 저장 → 오늘/내일 탭도 같은 시간표 기준으로 표시
-      await saveWeeklyTimetable(nextWeekKey, grid)
-      notifyTimetableUpdated()
-      const { added, cleaned } = await applyProgressLogic(nextWeekKey, grid)
-      let msg = ''
-      if (added > 0 && cleaned > 0) msg = `✅ ${added}건 추가, ${cleaned}건 정리됨`
-      else if (added > 0) msg = `✅ ${added}건 추가됨`
-      else if (cleaned > 0) msg = `✅ ${cleaned}건 정리됨`
-      else msg = '새로운 항목 없음'
-      setApplyMsg(msg)
-    } catch(e) {
-      setApplyMsg('오류가 발생했습니다'); console.error(e)
-    }
-    setApplying(false)
-    setTimeout(() => setApplyMsg(''), 3000)
-  }
-
   return (
-    <section className="card">
-      <div className="section-label">📅 다음 주 시간표 ({nextWeekKey})</div>
-      <div style={{display:'flex',gap:'8px',marginBottom:'12px',flexWrap:'wrap'}}>
-        <button className="btn btn-secondary btn-sm" onClick={loadFromBasic}>기본 시간표 불러오기</button>
-        <button className="btn btn-secondary btn-sm" onClick={loadFromThisWeek}>이번 주 시간표 불러오기</button>
-      </div>
-      <TimetableGrid grid={grid} onUpdate={update} />
-      <button className="btn btn-primary w-full mt-16" onClick={save} disabled={saving}>
-        {saving ? '저장 중...' : saved ? '✓ 저장됨' : '저장'}
-      </button>
-      <div style={{marginTop:'12px',borderTop:'1px solid var(--gray-100)',paddingTop:'12px'}}>
-        <button
-          className="btn btn-secondary w-full"
-          style={{background:'var(--pink-50)',color:'var(--pink-700)',border:'1.5px dashed var(--pink-300)'}}
-          onClick={applyToProgress}
-          disabled={applying}
-        >
-          {applying ? '처리 중...' : '📋 진도표에 반영'}
-        </button>
-        {applyMsg && (
-          <div style={{
-            marginTop:'8px',fontSize:'0.82rem',textAlign:'center',fontWeight:600,
-            color: applyMsg.startsWith('✅') ? 'var(--pink-600)' : 'var(--gray-500)'
-          }}>{applyMsg}</div>
-        )}
-        <div style={{fontSize:'0.72rem',color:'var(--gray-400)',marginTop:'6px',textAlign:'center'}}>
-          저장된 시간표를 진도표에 📌 계획 항목으로 추가합니다
-        </div>
-      </div>
-    </section>
+    <WeekTimetableEditor
+      weekKey={getNextWeekKey()}
+      title="📅 다음 주 시간표"
+      extraLoaders={[{ label: '이번 주 시간표 불러오기', load: () => getWeeklyTimetable(thisWeekKey) }]}
+    />
   )
 }
 
